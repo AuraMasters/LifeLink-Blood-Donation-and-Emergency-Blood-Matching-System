@@ -1,19 +1,12 @@
-import mongoose from 'mongoose';
 import { Hospital } from '../models/Hospital.js';
-import { BloodInventory } from '../models/BloodInventory.js';
+import { BloodInventory, ALL_BLOOD_GROUPS } from '../models/BloodInventory.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
-
-const ALL_BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export const getBloodBank = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(hospital_id)
-      ? { $or: [{ hospital_id: new mongoose.Types.ObjectId(hospital_id) }, { hospital_id: String(hospital_id) }] }
-      : { hospital_id: String(hospital_id) };
-
-    const inventory = await BloodInventory.find(query).lean();
+    const inventory = await BloodInventory.findByHospitalId(hospital_id);
 
     const inventoryMap = {};
     inventory.forEach((item) => {
@@ -36,11 +29,7 @@ export const updateBloodBank = async (req, res, next) => {
     const { hospital_id } = req.params;
     let { blood_group, units } = req.body;
 
-    const hospQuery = mongoose.Types.ObjectId.isValid(hospital_id)
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(hospital_id) }, { _id: String(hospital_id) }] }
-      : { _id: String(hospital_id) };
-
-    const hospital = await Hospital.findOne(hospQuery);
+    const hospital = await Hospital.findById(hospital_id);
     if (!hospital) {
       throw new AppError('Hospital not found', 404);
     }
@@ -60,16 +49,11 @@ export const updateBloodBank = async (req, res, next) => {
       throw new AppError('Units cannot be negative', 400);
     }
 
-    await BloodInventory.findOneAndUpdate(
-      { hospital_id: hospital._id, blood_group },
-      {
-        $set: {
-          units: unitCount,
-          updated_at: new Date(),
-        },
-      },
-      { upsert: true, new: true, runValidators: true }
-    );
+    await BloodInventory.upsert({
+      hospital_id: hospital.id,
+      blood_group,
+      units: unitCount,
+    });
 
     return res.status(200).json({
       message: 'Blood inventory updated successfully',
