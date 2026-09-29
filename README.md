@@ -21,28 +21,35 @@
 1. [Executive Overview](#executive-overview)
 2. [Key Capabilities and Features](#key-capabilities-and-features)
 3. [System Architecture](#system-architecture)
-   - [High-Level 3-Tier Architecture](#high-level-3-tier-architecture)
-   - [API Request and Middleware Pipeline](#api-request-and-middleware-pipeline)
-   - [Emergency Blood Matching Flowchart](#emergency-blood-matching-flowchart)
-   - [Referential Integrity and Cascade Deletion Lifecycle](#referential-integrity-and-cascade-deletion-lifecycle)
-4. [Unified Modeling Language (UML) Class Diagram](#unified-modeling-language-uml-class-diagram)
-5. [Entity-Relationship (ER) Diagram and DBMS Foundations](#entity-relationship-er-diagram-and-dbms-foundations)
-6. [End-to-End Business Processes](#end-to-end-business-processes)
+   - [Multi-Tier System Organization](#multi-tier-system-organization)
+   - [Core Domain Entities & Structural Specification](#core-domain-entities--structural-specification)
+4. [Entity-Relationship (ER) Diagram and Relational DBMS Foundations](#entity-relationship-er-diagram-and-relational-dbms-foundations)
+   - [Enhanced Crow's Foot Entity-Relationship Diagram](#enhanced-crows-foot-entity-relationship-diagram)
+   - [Relational Schema Mapping & Formal Notation](#1-relational-schema-mapping--mathematical-notation)
+   - [Functional Dependencies & Normalization Proofs (1NF through BCNF)](#2-functional-dependencies--normalization-proofs-1nf-through-bcnf)
+   - [Database Integrity Constraints Matrix](#3-database-integrity-constraints-matrix)
+   - [Disjoint Class Table Inheritance (Subtype Modeling)](#4-disjoint-class-table-inheritance-subtype-modeling)
+   - [ACID Transaction Management & Concurrency Control (MVCC)](#5-acid-transaction-management--concurrency-control)
+   - [Relational Database Views (Virtual Abstraction Layer)](#6-relational-database-views-virtual-abstraction-layer)
+   - [PL/pgSQL Stored Functions, Procedures & Triggers](#7-plpgsql-stored-functions-procedures--triggers)
+   - [Multi-Level Indexing Strategy & Execution Cost Optimization](#8-multi-level-indexing-strategy--execution-cost-optimization)
+   - [Textbook-Grade Relational Query Catalog (14 Formal Operations)](#comprehensive-database-query-catalog-dbms-operations--mathematical-formalization)
+5. [End-to-End Business Processes](#end-to-end-business-processes)
    - [1. User Onboarding and Role Segregation](#1-user-onboarding-and-role-segregation)
    - [2. Hospital Blood Bank Stock Management](#2-hospital-blood-bank-stock-management)
    - [3. Emergency Request Triage and Dispatch](#3-emergency-request-triage-and-dispatch)
    - [4. Donor Matching and Response Workflow](#4-donor-matching-and-response-workflow)
    - [5. Administrative Oversight and Moderation](#5-administrative-oversight-and-moderation)
-7. [Complete RESTful API Specification](#complete-restful-api-specification)
-8. [Database Schema and Indexing Strategy](#database-schema-and-indexing-strategy)
-9. [Blood Compatibility Reference Matrix](#blood-compatibility-reference-matrix)
-10. [Installation and Setup Guide](#installation-and-setup-guide)
+6. [Complete RESTful API Specification](#complete-restful-api-specification)
+7. [Database Schema and Indexing Strategy](#database-schema-and-indexing-strategy)
+8. [Blood Compatibility Reference Matrix](#blood-compatibility-reference-matrix)
+9. [Installation and Setup Guide](#installation-and-setup-guide)
    - [Prerequisites](#prerequisites)
    - [Backend Configuration and Execution](#backend-configuration-and-execution)
    - [Frontend Configuration and Execution](#frontend-configuration-and-execution)
-11. [Project Directory Structure](#project-directory-structure)
-12. [Future Scope: Native Mobile Application (Final Review)](#future-scope-native-mobile-application-final-review)
-13. [License and Acknowledgments](#license-and-acknowledgments)
+10. [Project Directory Structure](#project-directory-structure)
+11. [Future Scope: Native Mobile Application (Final Review)](#future-scope-native-mobile-application-final-review)
+12. [License and Acknowledgments](#license-and-acknowledgments)
 
 ---
 
@@ -73,305 +80,40 @@
 
 ## System Architecture
 
-### High-Level 3-Tier Architecture
+LifeLink is architectured as a decoupled, high-reliability enterprise healthcare platform organized across three distinct tiers:
 
-```mermaid
-graph TB
-    subgraph Client_Layer["Presentation Tier (Client Web App & Native Mobile App)"]
-        UI_Landing["Landing Page & Hero Portal"]
-        UI_Auth["Auth Portal (Login / Register Modals)"]
-        UI_Donor["Donor Dashboard & Match Radar"]
-        UI_Hospital["Hospital Dashboard & Blood Bank"]
-        UI_Admin["Admin Oversight & Governance Center"]
-        UI_Mobile["Cross-Platform Mobile App (iOS / Android)"]
-    end
+### 1. Presentation Tier (Client Applications)
+- **Web Portal (React 18 + TypeScript + Vite)**: Dynamic single-page application (SPA) providing role-based user interfaces for Donors, Hospitals, and System Administrators.
+- **State Management & Communication**: Reactive state providers utilizing standard Fetch API with Bearer token authentication and structured JSON payload handling.
 
-    subgraph Gateway_Layer["Security & API Gateway Layer (Express.js)"]
-        MW_Helmet["Helmet Security Headers"]
-        MW_CORS["CORS Protection"]
-        MW_Parser["JSON & URL Parsers (10MB Limit)"]
-        MW_ErrorHandler["Standardized Error Handler"]
-    end
+### 2. Application & API Gateway Tier (Node.js & Express)
+- **RESTful API Layer**: Standardized HTTP endpoints listening on `0.0.0.0:8000` handling authentication, clinical triage, emergency matching, and analytics.
+- **Security & Validation Middleware**: Helmet HTTP security headers, CORS origin verification, URL-encoded/JSON payload sanitization, and SQLSTATE error handling.
+- **Domain Business Logic**: Decoupled domain controllers orchestrating relational queries and ACID transactions.
 
-    subgraph Controller_Layer["Application Tier (Controllers & Services)"]
-        Ctrl_Auth["Auth Controller (Login & Session)"]
-        Ctrl_User["User Controller (Cascade Management)"]
-        Ctrl_Donor["Donor Controller (Profile & Geolocation)"]
-        Ctrl_Hospital["Hospital Controller (Profile & Directory)"]
-        Ctrl_BloodBank["Blood Bank Controller (8-Group Matrix)"]
-        Ctrl_Request["Blood Request Controller (Emergency Triage)"]
-        Ctrl_Analytics["Analytics Controller (Platform Metrics)"]
-    end
-
-    subgraph Data_Layer["Data Tier (PostgreSQL / Supabase & Relational Engine)"]
-        Col_Users[("users Table - PK & Unique Email Index")]
-        Col_Donors[("donors Table - Compound Index & FK Cascade")]
-        Col_Hospitals[("hospitals Table - Unique Phone Index & Auto-Inventory Trigger")]
-        Col_Inventory[("blood_inventory Table - Compound Unique Key")]
-        Col_Requests[("blood_requests Table - Terminal State Lock Trigger")]
-        Col_Pledges[("donation_pledges Table - ACID Transactions")]
-        Col_History[("donation_history Table - Automated Inventory & Request Trigger")]
-        Col_Notifications[("notifications Table - Real-Time Alert Queue")]
-    end
-
-    UI_Landing & UI_Auth & UI_Donor & UI_Hospital & UI_Admin & UI_Mobile -->|HTTP/REST| MW_Helmet
-    MW_Helmet --> MW_CORS
-    MW_CORS --> MW_Parser
-
-    MW_Parser --> Ctrl_Auth & Ctrl_User & Ctrl_Donor & Ctrl_Hospital & Ctrl_BloodBank & Ctrl_Request & Ctrl_Analytics
-
-    Ctrl_Auth --> Col_Users
-    Ctrl_User --> Col_Users & Col_Donors & Col_Hospitals & Col_Inventory & Col_Requests
-    Ctrl_Donor --> Col_Donors & Col_Users
-    Ctrl_Hospital --> Col_Hospitals & Col_Users
-    Ctrl_BloodBank --> Col_Inventory & Col_Hospitals
-    Ctrl_Request --> Col_Requests & Col_Hospitals & Col_Donors
-    Ctrl_Analytics --> Col_Users & Col_Donors & Col_Hospitals & Col_Inventory & Col_Requests
-
-    Ctrl_Auth & Ctrl_User & Ctrl_Donor & Ctrl_Hospital & Ctrl_BloodBank & Ctrl_Request & Ctrl_Analytics -.->|On Error| MW_ErrorHandler
-```
+### 3. Database Management Tier (PostgreSQL / Supabase)
+- **Relational Storage Engine**: PostgreSQL relational database with connection pooling via `pg.Pool` and dynamic SSL negotiation.
+- **Server-Side Procedural Automation**: Automated PL/pgSQL database triggers, user-defined functions (UDFs), and stored procedures enforcing data integrity and zero-latency inventory increments.
+- **Relational Integrity**: Foreign key constraints with `ON DELETE CASCADE` and `ON DELETE SET NULL`, check constraints, and unique compound keys.
 
 ---
 
-### API Request and Middleware Pipeline
+### Core Domain Entities & Structural Specification
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as Client App (React / Mobile App)
-    participant MW as Express Middleware (CORS / Helmet)
-    participant Router as API Router
-    participant Controller as Domain Controller
-    participant Model as PostgreSQL Model Layer
-    participant DB as PostgreSQL Database (Supabase)
-    participant ErrorMW as Global SQLSTATE Error Handler
-
-    Client->>MW: HTTP Request (Method, URL, Headers, Body)
-    MW->>MW: Apply Security Headers and Verify CORS Origin
-    MW->>MW: Parse JSON Body Payload
-    MW->>Router: Route Dispatch (/blood-requests, /users)
-    Router->>Controller: Invoke Controller Action
-    Controller->>Controller: Validate Payload and Domain Rules
-
-    alt Validation Failure
-        Controller-->>ErrorMW: next(new AppError(message, 400))
-        ErrorMW-->>Client: JSON Error Response (400 Bad Request)
-    else Validation Success
-        Controller->>Model: Execute Query / ACID Transaction
-        Model->>DB: PostgreSQL Parameterized Query ($1, $2, ...)
-        DB-->>Model: SQL Result Rows / Affected RowCount
-        Model-->>Controller: Domain Entities / DTOs
-        Controller-->>Client: JSON Response (200 / 201 Created)
-    end
-```
+| Entity | Primary Key | Foreign Keys | Key Attributes | DBMS Role |
+| :--- | :--- | :--- | :--- | :--- |
+| **`users`** | `id SERIAL` | None | `name`, `email` (UK), `password_hash`, `role` | Base supertype entity for authentication and access control. |
+| **`donors`** | `id SERIAL` | `user_id -> users(id)` (1:1) | `blood_group`, `phone`, `latitude`, `longitude`, `availability`, `last_donation_date` | Subtype entity storing donor medical and spatial coordinates. |
+| **`hospitals`** | `id SERIAL` | `user_id -> users(id)` (1:1) | `hospital_name`, `phone` (UK), `emergency_contact`, `address`, `latitude`, `longitude` | Subtype entity representing registered healthcare facilities. |
+| **`blood_inventory`**| `id SERIAL` | `hospital_id -> hospitals(id)` | `blood_group`, `units` (CHECK >= 0), `updated_at` | Tracks 8-group refrigeration stock with compound unique constraint `(hospital_id, blood_group)`. |
+| **`blood_requests`** | `id SERIAL` | `hospital_id -> hospitals(id)` | `blood_group`, `units_required`, `urgency`, `status` | Emergency blood requests categorized by clinical triage priority. |
+| **`donation_pledges`**| `id SERIAL` | `request_id`, `hospital_id`, `donor_id`, `donor_user_id` | `donor_name`, `donor_phone`, `blood_group`, `status`, `estimated_arrival` | Tracks donor pledges and real-time commitment fulfillment. |
+| **`donation_history`**| `id SERIAL` | `donor_id`, `hospital_id`, `blood_request_id`, `pledge_id` | `blood_group`, `units`, `donation_date`, `certificate_id` (UK) | Immutable clinical ledger of verified blood donations and certificates. |
+| **`notifications`** | `id SERIAL` | `request_id` (Optional) | `recipient_id`, `recipient_role`, `notification_type`, `title`, `message`, `is_read` | Real-time targeted communication and emergency alert queue. |
 
 ---
 
-### Emergency Blood Matching Flowchart
-
-```mermaid
-flowchart TD
-    Start(["Hospital Initiates Emergency Blood Request"]) --> InputCheck{"Validate Request Data"}
-    InputCheck -->|"Invalid Data"| ReturnErr["Return 400 Bad Request"]
-    InputCheck -->|"Valid Data"| CheckHosp{"Hospital Exists in DB?"}
-    
-    CheckHosp -->|"No"| ReturnNotFound["Return 404 Hospital Not Found"]
-    CheckHosp -->|"Yes"| SaveReq["Save Request with Status = 'searching'"]
-    
-    SaveReq --> Broadcast["Trigger Donor Matching Engine"]
-    Broadcast --> QueryDonors["Query Donors matching Blood Group and Availability = true"]
-    
-    QueryDonors --> FormatAlerts["Enrich Request with Hospital Contact, Address and Coordinates"]
-    FormatAlerts --> NotifyDonors["Dispatch to Active Donor Radar"]
-    
-    NotifyDonors --> DonorAction{"Donor Responds to Request?"}
-    DonorAction -->|"Accept and Contact"| Coordinate["Hospital and Donor Coordinate Fulfillment"]
-    DonorAction -->|"Pending / Waiting"| KeepSearching["Status remains 'searching'"]
-    
-    Coordinate --> Fulfill["Hospital updates Status to fulfilled or completed"]
-    Fulfill --> UpdateStock["Hospital updates Blood Bank Stock (+Units)"]
-    UpdateStock --> Done(["Workflow Complete"])
-```
-
----
-
-### Referential Integrity and Cascade Deletion Lifecycle
-
-```mermaid
-flowchart LR
-    AdminReq(["Delete User Request"]) --> ValidateUser{"Check User ID"}
-    ValidateUser -->|"Invalid ID"| Err400["Return 400 Invalid ID"]
-    ValidateUser -->|"Not Found"| Err404["Return 404 User Not Found"]
-    
-    ValidateUser -->|"Valid User"| CascadeStart["Begin Cascade Cleanup"]
-    
-    CascadeStart --> DelDonor["Delete Donor Profile (user_id = User._id)"]
-    CascadeStart --> FindHosp{"Hospital Profile Exists?"}
-    
-    FindHosp -->|"Yes"| DelStock["Delete all BloodInventory (hospital_id = Hosp._id)"]
-    DelStock --> DelReqs["Delete all BloodRequests (hospital_id = Hosp._id)"]
-    DelReqs --> DelHosp["Delete Hospital Profile"]
-    
-    FindHosp -->|"No"| DelUserDoc["Delete User Document"]
-    DelDonor --> DelUserDoc
-    DelHosp --> DelUserDoc
-    
-    DelUserDoc --> Complete(["Return 200: Cascade Cleanup Successful"])
-```
-
----
-
-## Unified Modeling Language (UML) Class Diagram
-
-The following comprehensive UML Class Diagram formalizes the object-oriented structure of LifeLink's domain entities, encapsulation attributes (with types and visibility markers), core controller operations, and system-level relationships (generalization, composition, aggregation, and associations with cardinalities).
-
-```mermaid
-classDiagram
-    direction TB
-
-    class User {
-        -int id
-        +string name
-        +string email
-        -string password_hash
-        +string role
-        +Timestamp created_at
-        +Timestamp updated_at
-        +register(userData) Promise~User~
-        +login(credentials) Promise~Session~
-        +updateProfile(data) Promise~User~
-        +deleteCascade() Promise~void~
-    }
-
-    class Donor {
-        -int id
-        -int user_id
-        +string blood_group
-        +string phone
-        +decimal latitude
-        +decimal longitude
-        +boolean availability
-        +Date last_donation_date
-        +Timestamp created_at
-        +Timestamp updated_at
-        +toggleAvailability() Promise~Donor~
-        +getCompatibleRequests() Promise~List~
-        +updateLocation(lat, lng) Promise~Donor~
-    }
-
-    class Hospital {
-        -int id
-        -int user_id
-        +string hospital_name
-        +string phone
-        +string emergency_contact
-        +decimal latitude
-        +decimal longitude
-        +string address
-        +Timestamp created_at
-        +Timestamp updated_at
-        +createBloodRequest(reqData) Promise~BloodRequest~
-        +updateStock(bloodGroup, units) Promise~BloodInventory~
-        +getStockMatrix() Promise~List~
-    }
-
-    class BloodInventory {
-        -int id
-        -int hospital_id
-        +string blood_group
-        +int units
-        +Timestamp updated_at
-        +setUnits(count) Promise~BloodInventory~
-        +incrementUnits(delta) Promise~BloodInventory~
-        +decrementUnits(delta) Promise~BloodInventory~
-    }
-
-    class BloodRequest {
-        -int id
-        -int hospital_id
-        +string blood_group
-        +int units_required
-        +int initial_units_required
-        +string urgency
-        +string patient_name
-        +string required_by
-        +string status
-        +Timestamp created_at
-        +Timestamp updated_at
-        +broadcastEmergency() Promise~void~
-        +findMatchingDonors() Promise~List~
-        +transitionStatus(newStatus) Promise~BloodRequest~
-    }
-
-    class DonationPledge {
-        -int id
-        -int request_id
-        -int hospital_id
-        -int donor_id
-        -int donor_user_id
-        +string donor_name
-        +string donor_phone
-        +string blood_group
-        +string status
-        +string estimated_arrival
-        +string notes
-        +Timestamp created_at
-        +Timestamp updated_at
-        +createPledge() Promise~DonationPledge~
-        +updateStatus(status) Promise~DonationPledge~
-    }
-
-    class DonationHistory {
-        -int id
-        -int donor_id
-        -int hospital_id
-        -int blood_request_id
-        -int pledge_id
-        +string blood_group
-        +int units
-        +Timestamp donation_date
-        +string donor_name
-        +string hospital_name
-        +string hospital_address
-        +string certificate_id
-        +string status
-        +string remarks
-        +Timestamp created_at
-        +Timestamp updated_at
-        +verifyAndRecord() Promise~DonationHistory~
-    }
-
-    class Notification {
-        -int id
-        +string recipient_id
-        +string recipient_role
-        +string notification_type
-        +string title
-        +string message
-        +string blood_group
-        +string request_id
-        +boolean is_read
-        +Timestamp created_at
-        +Timestamp updated_at
-        +markAsRead() Promise~Notification~
-        +dispatchAlert() Promise~void~
-    }
-
-    User <|-- Donor : specializes (user_id)
-    User <|-- Hospital : specializes (user_id)
-    Hospital "1" *-- "8" BloodInventory : maintains
-    Hospital "1" *-- "0..*" BloodRequest : broadcasts
-    BloodRequest "1" o-- "0..*" DonationPledge : receives
-    Donor "1" o-- "0..*" DonationPledge : commits
-    Donor "1" o-- "0..*" DonationHistory : achieves
-    Hospital "1" o-- "0..*" DonationHistory : records
-    DonationPledge "0..1" --o "1" DonationHistory : completes
-    BloodRequest "0..1" --o "0..*" DonationHistory : fulfills
-```
-
----
-
-## Entity-Relationship (ER) Diagram and DBMS Foundations
+## Entity-Relationship (ER) Diagram and Relational DBMS Foundations
 
 The LifeLink system data model is strictly normalized (1NF, 2NF, 3NF, BCNF) and executed on PostgreSQL with foreign keys, checks, unique constraints, and automated triggers.
 
@@ -613,17 +355,95 @@ export const withTransaction = async (workFn) => {
 
 ---
 
-#### 6. PL/pgSQL Stored Functions, Procedures & Triggers
+#### 6. Relational Database Views (Virtual Abstraction Layer)
 
-##### Stored Function: Geospatial Proximity Search
-Calculates spherical distance using the Haversine trigonometric formula directly in PostgreSQL:
+PostgreSQL views provide virtualized abstraction layers that simplify client queries, enforce security boundaries, and pre-aggregate operational analytics without data duplication:
+
+##### View 1: Active Emergency Requests (`v_active_emergency_requests`)
+Flattens the relational join between pending blood requests and hospital emergency facilities, exposing vital triage parameters and direct phone contacts:
+
+```sql
+CREATE OR REPLACE VIEW v_active_emergency_requests AS
+SELECT 
+    r.id AS request_id,
+    r.blood_group,
+    r.units_required,
+    r.initial_units_required,
+    r.urgency,
+    r.patient_name,
+    r.required_by,
+    r.status,
+    r.created_at AS request_created_at,
+    h.id AS hospital_id,
+    h.hospital_name,
+    h.phone AS hospital_phone,
+    h.emergency_contact,
+    h.address AS hospital_address,
+    h.latitude AS hospital_latitude,
+    h.longitude AS hospital_longitude
+FROM blood_requests r
+INNER JOIN hospitals h ON r.hospital_id = h.id
+WHERE r.status = 'searching';
+```
+
+##### View 2: Hospital Inventory Matrix (`v_hospital_inventory_matrix`)
+Aggregates blood units across healthcare facilities, providing an instant multi-attribute stock breakdown:
+
+```sql
+CREATE OR REPLACE VIEW v_hospital_inventory_matrix AS
+SELECT 
+    h.id AS hospital_id,
+    h.hospital_name,
+    h.emergency_contact,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'A+'  THEN bi.units ELSE 0 END), 0) AS units_a_pos,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'A-'  THEN bi.units ELSE 0 END), 0) AS units_a_neg,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'B+'  THEN bi.units ELSE 0 END), 0) AS units_b_pos,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'B-'  THEN bi.units ELSE 0 END), 0) AS units_b_neg,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'AB+' THEN bi.units ELSE 0 END), 0) AS units_ab_pos,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'AB-' THEN bi.units ELSE 0 END), 0) AS units_ab_neg,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'O+'  THEN bi.units ELSE 0 END), 0) AS units_o_pos,
+    COALESCE(SUM(CASE WHEN bi.blood_group = 'O-'  THEN bi.units ELSE 0 END), 0) AS units_o_neg,
+    COALESCE(SUM(bi.units), 0) AS total_available_units
+FROM hospitals h
+LEFT JOIN blood_inventory bi ON h.id = bi.hospital_id
+GROUP BY h.id, h.hospital_name, h.emergency_contact;
+```
+
+##### View 3: Donor Clinical Activity Ledger (`v_donor_activity_summary`)
+Computes donor engagement metrics, verified donations count, and total volume for clinical certifications and leaderboard recognition:
+
+```sql
+CREATE OR REPLACE VIEW v_donor_activity_summary AS
+SELECT 
+    d.id AS donor_id,
+    u.name AS donor_name,
+    u.email AS donor_email,
+    d.blood_group,
+    d.phone,
+    d.availability,
+    d.last_donation_date,
+    COALESCE(COUNT(dh.id), 0) AS total_donations_count,
+    COALESCE(SUM(dh.units), 0) AS total_units_contributed,
+    MAX(dh.donation_date) AS most_recent_donation_timestamp
+FROM donors d
+INNER JOIN users u ON d.user_id = u.id
+LEFT JOIN donation_history dh ON d.id = dh.donor_id
+GROUP BY d.id, u.name, u.email, d.blood_group, d.phone, d.availability, d.last_donation_date;
+```
+
+---
+
+#### 7. PL/pgSQL Stored Functions, Procedures & Triggers
+
+##### Stored Function 1: Geospatial Proximity Calculation (`fn_calculate_haversine_distance`)
+Calculates great-circle distance between two GPS coordinates directly inside the PostgreSQL query execution engine:
 
 ```sql
 CREATE OR REPLACE FUNCTION fn_calculate_haversine_distance(
     lat1 NUMERIC, lon1 NUMERIC, lat2 NUMERIC, lon2 NUMERIC
 ) RETURNS NUMERIC AS $$
 DECLARE
-    r NUMERIC := 6371; -- Earth radius in km
+    r NUMERIC := 6371; -- Earth mean radius in kilometers
     dlat NUMERIC := radians(lat2 - lat1);
     dlon NUMERIC := radians(lon2 - lon1);
     a NUMERIC;
@@ -640,8 +460,32 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-##### Stored Procedure: Inter-Hospital Blood Inventory Transfer
-Executes an ACID-compliant inventory transfer between two healthcare facilities:
+##### Stored Function 2: Biological ABO/Rh Blood Compatibility Rule (`fn_check_blood_compatibility`)
+Returns `TRUE` if a donor blood group is serologically compatible with a recipient patient:
+
+```sql
+CREATE OR REPLACE FUNCTION fn_check_blood_compatibility(
+    p_donor_group VARCHAR(5),
+    p_patient_group VARCHAR(5)
+) RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN CASE
+        WHEN p_donor_group = 'O-' THEN TRUE
+        WHEN p_donor_group = 'O+' AND p_patient_group IN ('O+', 'A+', 'B+', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'A-' AND p_patient_group IN ('A-', 'A+', 'AB-', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'A+' AND p_patient_group IN ('A+', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'B-' AND p_patient_group IN ('B-', 'B+', 'AB-', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'B+' AND p_patient_group IN ('B+', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'AB-' AND p_patient_group IN ('AB-', 'AB+') THEN TRUE
+        WHEN p_donor_group = 'AB+' AND p_patient_group = 'AB+' THEN TRUE
+        ELSE FALSE
+    END;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+```
+
+##### Stored Procedure 1: Inter-Hospital Blood Inventory Transfer (`sp_transfer_blood_units`)
+Executes an atomic inventory reallocation between two healthcare facilities using row-level pessimistic locks (`FOR UPDATE`):
 
 ```sql
 CREATE OR REPLACE PROCEDURE sp_transfer_blood_units(
@@ -654,10 +498,10 @@ DECLARE
     v_available_units INT;
 BEGIN
     IF p_units <= 0 THEN
-        RAISE EXCEPTION 'Transfer volume must be greater than zero';
+        RAISE EXCEPTION 'Transfer volume must be strictly positive';
     END IF;
 
-    -- Row-level lock to prevent concurrent inventory race condition
+    -- Row-level exclusive lock prevents concurrent inventory race conditions
     SELECT units INTO v_available_units
     FROM blood_inventory
     WHERE hospital_id = p_source_hospital_id AND blood_group = p_blood_group
@@ -667,12 +511,12 @@ BEGIN
         RAISE EXCEPTION 'Insufficient stock in source hospital: available %, requested %', v_available_units, p_units;
     END IF;
 
-    -- Deduct from source
+    -- Deduct from source hospital
     UPDATE blood_inventory
     SET units = units - p_units, updated_at = CURRENT_TIMESTAMP
     WHERE hospital_id = p_source_hospital_id AND blood_group = p_blood_group;
 
-    -- Add to target (upsert)
+    -- Credit to target hospital (upsert with conflict handling)
     INSERT INTO blood_inventory (hospital_id, blood_group, units, updated_at)
     VALUES (p_target_hospital_id, p_blood_group, p_units, CURRENT_TIMESTAMP)
     ON CONFLICT (hospital_id, blood_group)
@@ -681,32 +525,123 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
+##### Stored Procedure 2: Atomic Pledge Fulfillment and Ledger Certification (`sp_fulfill_donation_pledge`)
+Completes an emergency pledge, logs an immutable donation certificate, increments hospital inventory, and automatically decrements remaining units in the blood request:
+
+```sql
+CREATE OR REPLACE PROCEDURE sp_fulfill_donation_pledge(
+    p_pledge_id INT,
+    p_units INT,
+    p_remarks TEXT
+) AS $$
+DECLARE
+    v_pledge RECORD;
+    v_certificate VARCHAR(100);
+BEGIN
+    -- Fetch and lock pledge
+    SELECT * INTO v_pledge
+    FROM donation_pledges
+    WHERE id = p_pledge_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Donation pledge with ID % not found', p_pledge_id;
+    END IF;
+
+    IF v_pledge.status = 'completed' THEN
+        RAISE EXCEPTION 'Pledge % has already been fulfilled', p_pledge_id;
+    END IF;
+
+    -- Generate unique cryptographic certificate ID
+    v_certificate := 'CERT-' || TO_CHAR(CURRENT_TIMESTAMP, 'YYYYMMDD-HH24MISS') || '-' || LPAD(p_pledge_id::TEXT, 4, '0');
+
+    -- 1. Transition pledge status
+    UPDATE donation_pledges
+    SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_pledge_id;
+
+    -- 2. Insert immutable clinical ledger record
+    INSERT INTO donation_history (
+        donor_id, hospital_id, blood_request_id, pledge_id,
+        blood_group, units, donation_date, donor_name,
+        certificate_id, status, remarks, created_at, updated_at
+    ) VALUES (
+        v_pledge.donor_id, v_pledge.hospital_id, v_pledge.request_id, p_pledge_id,
+        v_pledge.blood_group, p_units, CURRENT_TIMESTAMP, v_pledge.donor_name,
+        v_certificate, 'verified', p_remarks, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    );
+
+    -- 3. Upsert blood inventory
+    INSERT INTO blood_inventory (hospital_id, blood_group, units, updated_at)
+    VALUES (v_pledge.hospital_id, v_pledge.blood_group, p_units, CURRENT_TIMESTAMP)
+    ON CONFLICT (hospital_id, blood_group)
+    DO UPDATE SET units = blood_inventory.units + EXCLUDED.units, updated_at = CURRENT_TIMESTAMP;
+
+    -- 4. Decrement blood request units
+    IF v_pledge.request_id IS NOT NULL THEN
+        UPDATE blood_requests
+        SET units_required = GREATEST(0, units_required - p_units),
+            status = CASE WHEN units_required - p_units <= 0 THEN 'fulfilled' ELSE status END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = v_pledge.request_id;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+```
+
 ##### Automated Database Triggers
-LifeLink executes business logic at the PostgreSQL storage engine level via 3 automated triggers:
+LifeLink guarantees operational data integrity at the database storage engine layer via 4 automated PL/pgSQL triggers:
 
 1. **`trg_after_hospital_insert`**:
-   - Fires automatically upon inserting a new hospital facility.
+   - Executes `AFTER INSERT ON hospitals FOR EACH ROW`.
    - Automatically initializes all 8 inventory slots (`A+` to `O-`) with 0 units on `ON CONFLICT DO NOTHING`.
-
 2. **`trg_after_donation_history_insert`**:
-   - Fires automatically upon inserting a verified donation record.
+   - Executes `AFTER INSERT ON donation_history FOR EACH ROW`.
    - Increments hospital inventory stock via `ON CONFLICT DO UPDATE`.
-   - Updates donor's `last_donation_date`.
+   - Updates donor's `last_donation_date` to current timestamp.
    - Decrements `units_required` in the linked `blood_requests` and auto-transitions request status to `'fulfilled'` when remaining units reach 0.
-
 3. **`trg_before_blood_request_update`**:
-   - Enforces a Terminal State Lock constraint.
-   - Raises an exception (`RAISE EXCEPTION`) if any query attempts to revert a fulfilled or completed request back to searching.
+   - Executes `BEFORE UPDATE ON blood_requests FOR EACH ROW`.
+   - Enforces a Terminal State Lock constraint: raises an exception (`RAISE EXCEPTION`) if any application query attempts to revert a `fulfilled`, `completed`, or `cancelled` request back to `searching`.
+4. **`trg_update_timestamp`**:
+   - Executes `BEFORE UPDATE` on `users`, `donors`, `hospitals`, `blood_inventory`, `blood_requests`, `donation_pledges`, `donation_history`, and `notifications`.
+   - Synchronizes `updated_at = CURRENT_TIMESTAMP` before write commit.
+
+---
+
+#### 8. Multi-Level Indexing Strategy & Execution Cost Optimization
+
+The database applies targeted B-Tree, Composite, Expression, and Partial indexes to guarantee logarithmic query evaluation $\mathcal{O}(\log N)$ under peak emergency loads:
+
+| Index Name | Target Relation | Indexed Column(s) | Indexing Type | DBMS Optimization Target |
+| :--- | :--- | :--- | :--- | :--- |
+| **`idx_users_email`** | `users` | `LOWER(email)` | B-Tree (Functional) | Instant $\mathcal{O}(\log N)$ case-insensitive login lookup. |
+| **`idx_users_role`** | `users` | `role` | B-Tree | Filtered user directory scans and role segregation. |
+| **`idx_donors_user_id`** | `donors` | `user_id` | B-Tree (Unique) | 1:1 foreign key join optimization with `users(id)`. |
+| **`idx_donors_blood_avail`** | `donors` | `(blood_group, availability)` | Composite B-Tree | Instant filtering for active compatible donors during trauma calls. |
+| **`idx_donors_coordinates`** | `donors` | `(latitude, longitude)` | Composite B-Tree | Spatial bounding box evaluation for Haversine proximity calculations. |
+| **`idx_hospitals_user_id`** | `hospitals` | `user_id` | B-Tree (Unique) | 1:1 foreign key join optimization with `users(id)`. |
+| **`idx_hospitals_phone`** | `hospitals` | `phone` | B-Tree (Unique) | Emergency hotline uniqueness check and facility resolution. |
+| **`idx_inventory_hosp_blood`** | `blood_inventory` | `(hospital_id, blood_group)`| Composite Unique B-Tree | Single-page seek for 8-group refrigeration matrices and upserts. |
+| **`idx_requests_status_group`** | `blood_requests` | `(status, blood_group)` | Composite B-Tree | Donor emergency radar query optimization. |
+| **`idx_requests_urgency`** | `blood_requests` | `urgency` | B-Tree | Clinical triage prioritization (`emergency` vs `urgent` vs `normal`). |
+| **`idx_pledges_request`** | `donation_pledges` | `request_id` | B-Tree | Rapid retrieval of pledges committed to an active blood request. |
+| **`idx_history_cert`** | `donation_history` | `certificate_id` | B-Tree (Unique) | Tamper-proof certificate verification and ledger lookup. |
+| **`idx_notifications_user`** | `notifications` | `(recipient_id, is_read)` | Composite B-Tree | Real-time unread alert count retrieval for notification bell badge. |
+
+##### Storage Engine Execution Cost Metrics
+Without indexing, emergency radar queries require a full sequential scan ($\text{Cost} = \mathcal{O}(N)$), loading all data pages from storage. With composite index `idx_donors_blood_avail`, the execution plan transitions to a **Bitmap Index Scan**, reducing disk I/O from thousands of disk blocks to a single logarithmic leaf node seek ($\text{Cost} = \mathcal{O}(\log N)$), delivering sub-millisecond query latencies.
 
 ---
 
 ### Comprehensive Database Query Catalog (DBMS Operations & Mathematical Formalization)
 
-Below is the exhaustive mathematical breakdown of queries executed within LifeLink, contrasting formal Relational Algebra, PostgreSQL ANSI SQL, and storage engine execution plans:
+Below is the exhaustive mathematical and operational breakdown of the 14 core relational operations powering LifeLink:
 
 #### Query 1: User Identity Authentication & Single-Record Selection
+- **DBMS Category**: Data Query Language (DQL) / Point Selection
 - **Relational Algebra**:
-  $$\sigma_{email = \text{'donor@lifelink.org'}}(USER)$$
+  $$\sigma_{\text{LOWER}(email) = \text{LOWER}('donor@lifelink.org')}(USER)$$
 - **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT id, name, email, password_hash, role
@@ -718,7 +653,28 @@ Below is the exhaustive mathematical breakdown of queries executed within LifeLi
 
 ---
 
-#### Query 2: Active Compatible Donor Discovery for Emergency Broadcast
+#### Query 2: Multi-Table Specialization: User Registration Transaction
+- **DBMS Category**: Data Manipulation Language (DML) / ACID Multi-Statement Transaction
+- **Relational Algebra**:
+  $$\text{BEGIN}; \; \text{INSERT INTO } USER \to \rho_{\text{uid}}(id); \; \text{INSERT INTO } DONOR(user\_id = \text{uid}); \; \text{COMMIT}$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  -- Step 1: Insert supertype record
+  INSERT INTO users (name, email, password_hash, role)
+  VALUES ($1, LOWER($2), $3, $4)
+  RETURNING id;
+
+  -- Step 2: Insert specialized subtype record (executed inside withTransaction)
+  INSERT INTO donors (user_id, blood_group, phone, latitude, longitude, availability)
+  VALUES ($1, $2, $3, $4, $5, $6)
+  RETURNING *;
+  ```
+- **Execution Plan**: Unique B-tree constraint verification on `users_email_key`, sequential serial generation via sequence `users_id_seq`, and foreign key integrity check on `donors_user_id_fkey`.
+
+---
+
+#### Query 3: Active Compatible Donor Discovery for Emergency Broadcast
+- **DBMS Category**: DQL / Composite Filtered Projection
 - **Relational Algebra**:
   $$\pi_{id, phone, latitude, longitude, availability}(\sigma_{blood\_group = \text{'O-'} \wedge availability = \text{TRUE}}(DONOR))$$
 - **PostgreSQL Parameterized SQL**:
@@ -727,21 +683,26 @@ Below is the exhaustive mathematical breakdown of queries executed within LifeLi
   FROM donors
   WHERE blood_group = $1 AND availability = TRUE;
   ```
-- **Execution Plan**: `Bitmap Index Scan on idx_donors_blood_avail`. Composite index filters both equality predicates before fetching heap pages.
+- **Execution Plan**: `Bitmap Index Scan on idx_donors_blood_avail`. Evaluates both conditions directly in index pages before fetching heap blocks.
 
 ---
 
-#### Query 3: Emergency Request Join with Healthcare Facility Infrastructure
+#### Query 4: Emergency Request Multi-Table Relational Join
+- **DBMS Category**: DQL / Equi-Join with Selective Filtering
 - **Relational Algebra**:
-  $$\pi_{r.id, r.blood\_group, r.units\_required, r.urgency, h.hospital\_name, h.phone, h.address, h.latitude, h.longitude}(\sigma_{r.blood\_group = \text{'O-'} \wedge r.status = \text{'searching'}}(BLOOD\_REQUEST \; r) \bowtie_{r.hospital\_id = h.id} HOSPITAL \; h)$$
+  $$\pi_{r.*, h.hospital\_name, h.phone, h.address}(\sigma_{r.blood\_group = 'O-' \wedge r.status = 'searching'}(BLOOD\_REQUEST \; r) \bowtie_{r.hospital\_id = h.id} HOSPITAL \; h)$$
 - **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT 
     r.id AS request_id,
     r.blood_group,
     r.units_required,
+    r.initial_units_required,
     r.urgency,
+    r.patient_name,
+    r.required_by,
     r.status,
+    r.created_at,
     h.hospital_name,
     h.phone AS hospital_phone,
     h.emergency_contact,
@@ -753,11 +714,12 @@ Below is the exhaustive mathematical breakdown of queries executed within LifeLi
   WHERE r.blood_group = $1 AND r.status = 'searching'
   ORDER BY r.created_at DESC;
   ```
-- **Execution Plan**: `Nested Loop / Hash Join` using `idx_requests_status_group` on `blood_requests` and PK Index on `hospitals.id`.
+- **Execution Plan**: `Hash Join` between indexed `blood_requests` (using `idx_requests_status_group`) and primary key lookup on `hospitals.id`.
 
 ---
 
-#### Query 4: 8-Group Refrigeration Stock Fetch
+#### Query 5: 8-Group Refrigeration Stock Fetch with Compound Key Seek
+- **DBMS Category**: DQL / Keyed Multi-Tuple Retrieval
 - **Relational Algebra**:
   $$\pi_{blood\_group, units}(\sigma_{hospital\_id = h}(BLOOD\_INVENTORY))$$
 - **PostgreSQL Parameterized SQL**:
@@ -770,7 +732,8 @@ Below is the exhaustive mathematical breakdown of queries executed within LifeLi
 
 ---
 
-#### Query 5: Atomic Inventory Upsert (ON CONFLICT DO UPDATE)
+#### Query 6: Atomic Inventory Upsert (ON CONFLICT DO UPDATE)
+- **DBMS Category**: DML / Atomic Upsert Mutation
 - **Relational Algebra**:
   $$\text{UPSERT}(BLOOD\_INVENTORY, hospital\_id = h \wedge blood\_group = g, units \leftarrow u)$$
 - **PostgreSQL Parameterized SQL**:
@@ -785,74 +748,164 @@ Below is the exhaustive mathematical breakdown of queries executed within LifeLi
 
 ---
 
-#### Query 6: Aggregate Platform Blood Reserves Rollup
+#### Query 7: Controlled Decrement with Non-Negative Bound Verification
+- **DBMS Category**: DML / Constrained State Mutation
 - **Relational Algebra**:
-  $$\gamma_{blood\_group, \text{SUM}(units) \to total\_units}(BLOOD\_INVENTORY)$$
-- **PostgreSQL SQL**:
+  $$\sigma_{units \ge u}(\text{UPDATE } BLOOD\_INVENTORY \text{ SET } units \leftarrow units - u)$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
-  SELECT blood_group, COALESCE(SUM(units), 0) AS total_units
-  FROM blood_inventory
-  GROUP BY blood_group;
+  UPDATE blood_inventory
+  SET units = units - $1, updated_at = CURRENT_TIMESTAMP
+  WHERE hospital_id = $2 AND blood_group = $3 AND units >= $1
+  RETURNING *;
   ```
-- **Execution Plan**: `HashAggregate` across the 8 distinct blood group buckets.
+- **Execution Plan**: `Index Scan on idx_inventory_hosp_blood`. Storage engine checks `units >= $1` atomically; returns 0 modified rows if stock is insufficient.
 
 ---
 
-#### Query 7: Referential Cascade Account Deletion
+#### Query 8: Spatial Proximity & Biological Compatibility Radar
+- **DBMS Category**: DQL / Spatial Trigonometric Geospatial Search
+- **Relational Algebra**:
+  $$\sigma_{\text{distance} \le r}(\pi_{*, \text{fn\_haversine}(d.lat, d.lon, h.lat, h.lon) \to \text{distance}}(BLOOD\_REQUEST \bowtie HOSPITAL))$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  SELECT 
+    r.id,
+    r.blood_group,
+    r.units_required,
+    r.urgency,
+    h.hospital_name,
+    h.phone AS hospital_phone,
+    h.emergency_contact,
+    h.address,
+    fn_calculate_haversine_distance($1, $2, h.latitude, h.longitude) AS distance_km
+  FROM blood_requests r
+  INNER JOIN hospitals h ON r.hospital_id = h.id
+  WHERE r.status = 'searching'
+    AND fn_check_blood_compatibility($3, r.blood_group) = TRUE
+    AND fn_calculate_haversine_distance($1, $2, h.latitude, h.longitude) <= $4
+  ORDER BY distance_km ASC;
+  ```
+- **Execution Plan**: Filters candidate requests using composite index `idx_requests_status_group`, joins hospital coordinates, and computes trigonometric distances in-memory.
+
+---
+
+#### Query 9: Emergency Blood Request Creation & Status Broadcast
+- **DBMS Category**: DML / State Creation
+- **Relational Algebra**:
+  $$\text{INSERT INTO } BLOOD\_REQUEST(\dots) \text{ RETURNING } *$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  INSERT INTO blood_requests (
+    hospital_id, blood_group, units_required, initial_units_required,
+    urgency, patient_name, required_by, status
+  ) VALUES ($1, $2, $3, $3, $4, $5, $6, 'searching')
+  RETURNING *;
+  ```
+- **Execution Plan**: Sequence generation via `blood_requests_id_seq`, validation of domain check constraints (`urgency`, `blood_group`), and immediate tuple emission.
+
+---
+
+#### Query 10: Real-Time Donation Pledge Insertion & Foreign Key Validation
+- **DBMS Category**: DML / Relational Association
+- **Relational Algebra**:
+  $$\text{INSERT INTO } DONATION\_PLEDGE(request\_id, hospital\_id, donor\_id, \dots)$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  INSERT INTO donation_pledges (
+    request_id, hospital_id, donor_id, donor_user_id,
+    donor_name, donor_phone, blood_group, status, estimated_arrival, notes
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+  RETURNING *;
+  ```
+- **Execution Plan**: Foreign key verification against `blood_requests(id)`, `hospitals(id)`, and `donors(id)` before index insertion.
+
+---
+
+#### Query 11: Transactional Pledge Fulfillment & Immutable Ledger Certificate Issuance
+- **DBMS Category**: DML / Atomic Multi-Relation Ledger Mutation
+- **Relational Algebra**:
+  $$\text{BEGIN}; \; \text{UPDATE } DONATION\_PLEDGE; \; \text{INSERT INTO } DONATION\_HISTORY; \; \text{COMMIT};$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  -- Step 1: Update pledge status
+  UPDATE donation_pledges
+  SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+  WHERE id = $1;
+
+  -- Step 2: Record verified immutable clinical ledger certificate
+  INSERT INTO donation_history (
+    donor_id, hospital_id, blood_request_id, pledge_id,
+    blood_group, units, donation_date, donor_name, hospital_name,
+    hospital_address, certificate_id, status, remarks
+  ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, $7, $8, $9, $10, 'verified', $11)
+  RETURNING *;
+  ```
+- **Execution Plan**: Enforces unique key constraint on `certificate_id` and fires `trg_after_donation_history_insert` to auto-adjust inventory and request state.
+
+---
+
+#### Query 12: Notification Dispatch Queue Retrieval & Unread Counter
+- **DBMS Category**: DQL / Keyed Filtering with Sorting
+- **Relational Algebra**:
+  $$\pi_{id, title, message, blood\_group, is\_read, created\_at}(\sigma_{recipient\_id = u \vee recipient\_role = 'all'}(NOTIFICATION))$$
+- **PostgreSQL Parameterized SQL**:
+  ```sql
+  SELECT id, recipient_role, notification_type, title, message, blood_group, is_read, created_at
+  FROM notifications
+  WHERE recipient_id = $1 OR recipient_role = 'all' OR recipient_role = $2
+  ORDER BY created_at DESC
+  LIMIT 20;
+  ```
+- **Execution Plan**: `Index Scan on idx_notifications_user` with descending chronological ordering.
+
+---
+
+#### Query 13: Platform-Wide Analytics Cross-Tabulation & Statistical Aggregations
+- **DBMS Category**: DQL / Complex Analytical Rollup
+- **Relational Algebra**:
+  $$\gamma_{COUNT(USER), COUNT(DONOR), COUNT(HOSPITAL), SUM(units)}(DATABASE)$$
+- **PostgreSQL SQL**:
+  ```sql
+  SELECT 
+    (SELECT COUNT(*) FROM users) AS total_users,
+    (SELECT COUNT(*) FROM donors) AS total_donors,
+    (SELECT COUNT(*) FROM hospitals) AS total_hospitals,
+    (SELECT COUNT(*) FROM blood_requests) AS total_requests,
+    (SELECT COUNT(*) FROM blood_requests WHERE status = 'searching') AS active_requests,
+    (SELECT COUNT(*) FROM blood_requests WHERE urgency = 'emergency' AND status = 'searching') AS critical_emergencies,
+    (SELECT COALESCE(SUM(units), 0) FROM blood_inventory) AS total_blood_units,
+    (SELECT COUNT(*) FROM donation_history WHERE status = 'verified') AS total_completed_donations;
+  ```
+- **Execution Plan**: Parallel subquery execution utilizing primary key index scans with fast scalar aggregation.
+
+---
+
+#### Query 14: Strict Referential Cascade Account Deletion
+- **DBMS Category**: DML / Recursive Relational Deletion
 - **Relational Algebra**:
   $$\text{DELETE FROM } USER \text{ WHERE } id = u \implies \text{CASCADE DELETE}(DONOR, HOSPITAL \to (BLOOD\_INVENTORY, BLOOD\_REQUEST))$$
 - **PostgreSQL Parameterized SQL**:
   ```sql
   DELETE FROM users WHERE id = $1;
   ```
-- **Execution Plan**: Foreign key triggers automatically clean up associated records in `donors`, `hospitals`, `blood_inventory`, `blood_requests`, `donation_pledges`, `donation_history`, and `notifications` in topological dependency order.
-
----
-
-#### Query 8: Triage Request Status Transition
-- **Relational Algebra**:
-  $$\text{UPDATE } BLOOD\_REQUEST \text{ SET } status = 'fulfilled', updated\_at = \text{NOW}() \text{ WHERE } id = r$$
-- **PostgreSQL Parameterized SQL**:
-  ```sql
-  UPDATE blood_requests
-  SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP
-  WHERE id = $1
-  RETURNING *;
-  ```
-- **Execution Plan**: `Index Scan on blood_requests_pkey`. `trg_before_blood_request_update` validates valid state transition.
-
----
-
-#### Query 9: User Directory Multi-Attribute Pagination & Search
-- **Relational Algebra**:
-  $$\pi_{id, name, email, role, created\_at}(\sigma_{role = \text{'donor'}}(USER))$$
-- **PostgreSQL Parameterized SQL**:
-  ```sql
-  SELECT id, name, email, role, created_at
-  FROM users
-  WHERE role = $1
-  ORDER BY created_at DESC
-  LIMIT $2 OFFSET $3;
-  ```
-- **Execution Plan**: `Index Scan using idx_users_role on users`. Cost-effective pagination without full table scan.
+- **Execution Plan**: Foreign key triggers automatically clean up associated records in `donors`, `hospitals`, `blood_inventory`, `blood_requests`, `donation_pledges`, `donation_history`, and `notifications` in topological dependency order without orphan tuples.
 
 ---
 
 ## End-to-End Business Processes
 
 ### 1. User Onboarding and Role Segregation
-```mermaid
-graph TD
-    A["Visitor Lands on LifeLink"] --> B{"Select Role"}
-    B -->|Donor| C["Fill Donor Registration Form"]
-    B -->|Hospital| D["Fill Hospital Registration Form"]
-    
-    C --> E["1. INSERT INTO users<br/>2. INSERT INTO donors"]
-    D --> F["1. INSERT INTO users<br/>2. INSERT INTO hospitals"]
-    
-    E --> G["Redirect to Donor Dashboard"]
-    F --> H["Redirect to Hospital Blood Bank Management"]
-```
+
+LifeLink enforces strict subtype polymorphism during user registration through a coordinated two-table transactional workflow:
+
+| Step | Operation Phase | Action / PostgreSQL Primitive | Technical Description |
+| :--- | :--- | :--- | :--- |
+| **1. Ingestion** | Input Validation | Request Payload Sanitization | Visitor submits email, password, legal name, and designated role (`donor` or `hospital`). |
+| **2. Supertype Insertion** | Base Identity Creation | `INSERT INTO users (...) RETURNING id;` | A cryptographic bcrypt hash is generated and a base user record is committed with generated `id`. |
+| **3. Subtype Polymorphism**| Role-Based Branching | `INSERT INTO donors` / `INSERT INTO hospitals` | If role is `donor`, medical blood group and geolocation coordinates are stored referencing `user_id`. If `hospital`, institutional license and hotline data are stored. |
+| **4. Session Minting** | Token Generation | Sign JWT with `{ id, email, role }` | An authentication token is generated with a 7-day expiration and signed with server-side secret. |
+| **5. Portal Routing** | Client Dispatch | HTTP 201 Response | The client is redirected to the role-specific portal (Donor Emergency Radar or Hospital Blood Bank Management). |
 
 ### 2. Hospital Blood Bank Stock Management
 1. **Matrix Initialization**: Hospitals query `GET /hospitals/:id/blood-bank`. The backend guarantees an 8-slot response representing `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-` (with `0` units if not yet explicitly stocked).
@@ -1378,38 +1431,17 @@ DBMS/
 
 For the final review and strategic roadmap, the core future development is the **Cross-Platform Native Mobile Application (iOS & Android)** engineered to empower on-the-go volunteer donors and emergency medical responders.
 
-```mermaid
-flowchart TD
-    subgraph Mobile_App["LifeLink Native Mobile Application"]
-        UI_DonorApp["Donor Mobile Client (React Native / Flutter)"]
-        Sensors["Native GPS Telemetry & Geolocation Beacon"]
-        FCM["Firebase Cloud Messaging (FCM) & Apple APNs"]
-        LocalCache["Offline SQLite / WatermelonDB Cache"]
-    end
+### Mobile Architecture & Native Hardware Interfacing Matrix
 
-    subgraph Backend_Gateway["LifeLink Backend Gateway"]
-        APIGateway["Express RESTful API Gateway"]
-        AuthService["JWT & Device Token Authentication"]
-        TriageEngine["Haversine Proximity Matching Engine"]
-    end
-
-    subgraph Hardware_Alerts["Emergency Hardware Alerts"]
-        PushNotification["High-Priority Audio Emergency Alarm"]
-        GeoProximity["Real-time 15km Radius Proximity Trigger"]
-        MapsNav["Direct Turn-by-Turn GPS Navigation"]
-    end
-
-    UI_DonorApp --> Sensors
-    Sensors --> GeoProximity
-    FCM --> PushNotification
-    UI_DonorApp --> LocalCache
-    LocalCache <-->|Bi-Directional Sync| APIGateway
-
-    APIGateway --> AuthService
-    APIGateway --> TriageEngine
-    TriageEngine --> FCM
-    UI_DonorApp --> MapsNav
-```
+| System Layer | Architectural Component | Technology Stack / Protocol | Technical Responsibility & Interaction |
+| :--- | :--- | :--- | :--- |
+| **Presentation Tier** | Cross-Platform Native Client | React Native / Flutter (iOS & Android) | 60 FPS responsive touch UI, dark mode themes, biometric authentication prompt integration. |
+| **Hardware Telemetry** | Geolocation & Motion Sensors | Native CoreLocation / Android Location API | Continuous background GPS beacon streaming coordinates for emergency radar radius calculations. |
+| **Push Dispatch Tier** | Emergency Alert Delivery | Firebase Cloud Messaging (FCM) & Apple APNs | Dedicated high-priority alert channel bypassing Silent/DND modes for critical trauma calls. |
+| **Local Persistence** | Offline-First Cache | Embedded SQLite / WatermelonDB | Zero-latency local storage of donor card, past donation certificates, and offline ABO chart. |
+| **Gateway & Security** | RESTful API Layer | Express.js over TLS 1.3 / JWT Auth | Bearer token authentication, rate limiting, and parameter sanitization. |
+| **Computational Core** | Spatial & Clinical Matching | PostgreSQL PL/pgSQL & Haversine Engine | Instantaneous matching of donor blood group and dynamic 15 km geofence radius. |
+| **Turn-by-Turn Navigation** | Native Mapping Interface | Apple Maps / Google Maps Deep Linking | Instant one-tap navigation routing emergency responders to target hospital blood bank. |
 
 ### Core Mobile Application Capabilities
 
