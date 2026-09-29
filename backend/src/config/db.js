@@ -25,11 +25,15 @@ export const formatSql = (sql) => {
   return sql.replace(/\?/g, () => `$${index++}`);
 };
 
-export const query = async (sql, params = []) => {
+const rawPoolQuery = pool.query.bind(pool);
+
+pool.query = async (sql, params = []) => {
   const formatted = formatSql(sql);
-  const result = await pool.query(formatted, params);
+  const result = await rawPoolQuery(formatted, params);
   return [result.rows, result];
 };
+
+export const query = pool.query;
 
 export const withTransaction = async (workFn) => {
   const client = await pool.connect();
