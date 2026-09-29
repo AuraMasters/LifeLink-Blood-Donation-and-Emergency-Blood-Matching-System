@@ -1,20 +1,14 @@
-import mongoose from 'mongoose';
 import { Hospital } from '../models/Hospital.js';
 import { User } from '../models/User.js';
-import { BloodInventory } from '../models/BloodInventory.js';
+import { BloodInventory, ALL_BLOOD_GROUPS } from '../models/BloodInventory.js';
 import { BloodRequest } from '../models/BloodRequest.js';
+import { withTransaction } from '../config/db.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
-
-const ALL_BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export const createHospital = async (req, res, next) => {
   try {
     const { user_id } = req.params;
     const { hospital_name, phone, emergency_contact, latitude, longitude, address } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(user_id)) {
-      throw new AppError('Invalid user ID', 400);
-    }
 
     const user = await User.findById(user_id);
     if (!user) {
@@ -25,16 +19,19 @@ export const createHospital = async (req, res, next) => {
       throw new AppError('User role is not hospital', 400);
     }
 
-    const existingHospital = await Hospital.findOne({ user_id });
+    const existingHospital = await Hospital.findByUserId(user_id);
     if (existingHospital) {
       throw new AppError('Hospital profile already exists', 400);
     }
 
-    const existingPhone = await Hospital.findOne({ phone: phone?.trim() });
-    if (existingPhone) {
-      throw new AppError('Hospital phone already exists', 400);
+    if (phone) {
+      const existingPhone = await Hospital.findByPhone(phone);
+      if (existingPhone) {
+        throw new AppError('Hospital phone already exists', 400);
+      }
     }
 
+    
     const hospital = await Hospital.create({
       user_id,
       hospital_name: hospital_name?.trim(),
@@ -47,8 +44,8 @@ export const createHospital = async (req, res, next) => {
 
     return res.status(200).json({
       message: 'Hospital created successfully',
-      hospital_id: hospital._id.toString(),
-      user_id,
+      hospital_id: String(hospital.id),
+      user_id: String(user_id),
     });
   } catch (error) {
     next(error);
@@ -57,16 +54,16 @@ export const createHospital = async (req, res, next) => {
 
 export const getHospitals = async (req, res, next) => {
   try {
-    const hospitals = await Hospital.find().sort({ created_at: -1 }).lean();
+    const hospitals = await Hospital.findAll();
 
     const formatted = hospitals.map((h) => ({
-      id: h._id.toString(),
-      user_id: h.user_id ? h.user_id.toString() : '',
+      id: String(h.id),
+      user_id: String(h.user_id),
       hospital_name: h.hospital_name,
       phone: h.phone,
       emergency_contact: h.emergency_contact,
-      latitude: h.latitude,
-      longitude: h.longitude,
+      latitude: Number(h.latitude) || 0,
+      longitude: Number(h.longitude) || 0,
       address: h.address,
     }));
 
@@ -79,31 +76,29 @@ export const getHospitals = async (req, res, next) => {
 export const getPublicHospitalsMap = async (req, res, next) => {
   try {
     const [hospitals, inventories, activeRequests] = await Promise.all([
-      Hospital.find().sort({ created_at: -1 }).lean(),
-      BloodInventory.find().lean(),
-      BloodRequest.find({ status: 'searching' }).lean(),
+      Hospital.findAll(),
+      BloodInventory.findAll(),
+      BloodRequest.findAll({ status: 'searching' }),
     ]);
 
-    // Index inventory by hospital_id
+    
     const inventoryMap = {};
     inventories.forEach((item) => {
-      const hId = item.hospital_id ? item.hospital_id.toString() : '';
-      if (!hId) return;
+      const hId = String(item.hospital_id);
       if (!inventoryMap[hId]) inventoryMap[hId] = {};
       inventoryMap[hId][item.blood_group] = item.units;
     });
 
-    // Index requests by hospital_id
+    
     const requestMap = {};
     activeRequests.forEach((reqItem) => {
-      const hId = reqItem.hospital_id ? reqItem.hospital_id.toString() : '';
-      if (!hId) return;
+      const hId = String(reqItem.hospital_id);
       if (!requestMap[hId]) requestMap[hId] = [];
       requestMap[hId].push(reqItem.blood_group);
     });
 
     const response = hospitals.map((h) => {
-      const hId = h._id.toString();
+      const hId = String(h.id);
       const hospitalStock = inventoryMap[hId] || {};
       const stockByGroup = {};
       let totalUnits = 0;
@@ -121,8 +116,8 @@ export const getPublicHospitalsMap = async (req, res, next) => {
         hospital_name: h.hospital_name,
         phone: h.phone,
         emergency_contact: h.emergency_contact,
-        latitude: h.latitude || 0,
-        longitude: h.longitude || 0,
+        latitude: Number(h.latitude) || 0,
+        longitude: Number(h.longitude) || 0,
         address: h.address,
         total_units: totalUnits,
         stock_by_group: stockByGroup,
@@ -141,23 +136,19 @@ export const getHospitalByUserId = async (req, res, next) => {
   try {
     const { user_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(user_id)
-      ? { $or: [{ user_id: new mongoose.Types.ObjectId(user_id) }, { user_id: String(user_id) }] }
-      : { user_id: String(user_id) };
-
-    const hospital = await Hospital.findOne(query).lean();
+    const hospital = await Hospital.findByUserId(user_id);
     if (!hospital) {
       throw new AppError('Hospital not found', 404);
     }
 
     return res.status(200).json({
-      id: hospital._id.toString(),
-      user_id: hospital.user_id ? hospital.user_id.toString() : '',
+      id: String(hospital.id),
+      user_id: String(hospital.user_id),
       hospital_name: hospital.hospital_name,
       phone: hospital.phone,
       emergency_contact: hospital.emergency_contact,
-      latitude: hospital.latitude,
-      longitude: hospital.longitude,
+      latitude: Number(hospital.latitude) || 0,
+      longitude: Number(hospital.longitude) || 0,
       address: hospital.address,
     });
   } catch (error) {
@@ -169,23 +160,19 @@ export const getHospitalById = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(hospital_id)
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(hospital_id) }, { _id: String(hospital_id) }] }
-      : { _id: String(hospital_id) };
-
-    const hospital = await Hospital.findOne(query).lean();
+    const hospital = await Hospital.findById(hospital_id);
     if (!hospital) {
       throw new AppError('Hospital not found', 404);
     }
 
     return res.status(200).json({
-      id: hospital._id.toString(),
-      user_id: hospital.user_id ? hospital.user_id.toString() : '',
+      id: String(hospital.id),
+      user_id: String(hospital.user_id),
       hospital_name: hospital.hospital_name,
       phone: hospital.phone,
       emergency_contact: hospital.emergency_contact,
-      latitude: hospital.latitude,
-      longitude: hospital.longitude,
+      latitude: Number(hospital.latitude) || 0,
+      longitude: Number(hospital.longitude) || 0,
       address: hospital.address,
     });
   } catch (error) {
@@ -197,15 +184,8 @@ export const updateHospital = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(hospital_id)
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(hospital_id) }, { _id: String(hospital_id) }] }
-      : { _id: String(hospital_id) };
-
     const updates = { ...req.body };
-    const hospital = await Hospital.findOneAndUpdate(query, updates, {
-      new: true,
-      runValidators: true,
-    });
+    const hospital = await Hospital.update(hospital_id, updates);
 
     if (!hospital) {
       throw new AppError('Hospital not found', 404);
@@ -214,13 +194,13 @@ export const updateHospital = async (req, res, next) => {
     return res.status(200).json({
       message: 'Hospital updated successfully',
       hospital: {
-        id: hospital._id.toString(),
-        user_id: hospital.user_id ? hospital.user_id.toString() : '',
+        id: String(hospital.id),
+        user_id: String(hospital.user_id),
         hospital_name: hospital.hospital_name,
         phone: hospital.phone,
         emergency_contact: hospital.emergency_contact,
-        latitude: hospital.latitude,
-        longitude: hospital.longitude,
+        latitude: Number(hospital.latitude) || 0,
+        longitude: Number(hospital.longitude) || 0,
         address: hospital.address,
       },
     });
@@ -233,22 +213,14 @@ export const deleteHospital = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(hospital_id)) {
-      throw new AppError('Invalid hospital ID', 400);
-    }
-
-    await BloodInventory.deleteMany({ hospital_id });
-    await BloodRequest.deleteMany({ hospital_id });
-
-    const result = await Hospital.deleteOne({ _id: hospital_id });
-
-    if (result.deletedCount === 0) {
+    const deleted = await Hospital.delete(hospital_id);
+    if (!deleted) {
       throw new AppError('Hospital not found', 404);
     }
 
     return res.status(200).json({
       message: 'Hospital deleted successfully',
-      hospital_id,
+      hospital_id: String(hospital_id),
     });
   } catch (error) {
     next(error);

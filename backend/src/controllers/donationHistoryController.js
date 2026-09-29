@@ -1,11 +1,9 @@
-import mongoose from 'mongoose';
 import { DonationHistory } from '../models/DonationHistory.js';
 import { Donor } from '../models/Donor.js';
 import { Hospital } from '../models/Hospital.js';
-import { User } from '../models/User.js';
-import { BloodInventory } from '../models/BloodInventory.js';
 import { BloodRequest } from '../models/BloodRequest.js';
 import { Notification } from '../models/Notification.js';
+import { withTransaction } from '../config/db.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 
 function generateCertificateId() {
@@ -16,16 +14,14 @@ function generateCertificateId() {
 
 export const getAllDonationHistory = async (req, res, next) => {
   try {
-    const history = await DonationHistory.find()
-      .sort({ donation_date: -1 })
-      .lean();
+    const history = await DonationHistory.findAll();
 
     const formatted = history.map((item) => ({
-      id: item._id.toString(),
-      donor_id: item.donor_id ? item.donor_id.toString() : '',
-      hospital_id: item.hospital_id ? item.hospital_id.toString() : '',
-      blood_request_id: item.blood_request_id ? item.blood_request_id.toString() : null,
-      pledge_id: item.pledge_id ? item.pledge_id.toString() : null,
+      id: String(item.id),
+      donor_id: String(item.donor_id),
+      hospital_id: String(item.hospital_id),
+      blood_request_id: item.blood_request_id ? String(item.blood_request_id) : null,
+      pledge_id: item.pledge_id ? String(item.pledge_id) : null,
       blood_group: item.blood_group,
       units: item.units,
       donation_date: item.donation_date ? new Date(item.donation_date).toISOString() : new Date().toISOString(),
@@ -47,25 +43,19 @@ export const getDonorHistory = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(donor_id)) {
-      throw new AppError('Invalid donor ID', 400);
-    }
-
     const donor = await Donor.findById(donor_id);
     if (!donor) {
       throw new AppError('Donor not found', 404);
     }
 
-    const history = await DonationHistory.find({ donor_id })
-      .sort({ donation_date: -1 })
-      .lean();
+    const history = await DonationHistory.findByDonorId(donor_id);
 
     const formattedHistory = history.map((item) => ({
-      id: item._id.toString(),
-      donor_id: item.donor_id ? item.donor_id.toString() : '',
-      hospital_id: item.hospital_id ? item.hospital_id.toString() : '',
-      blood_request_id: item.blood_request_id ? item.blood_request_id.toString() : null,
-      pledge_id: item.pledge_id ? item.pledge_id.toString() : null,
+      id: String(item.id),
+      donor_id: String(item.donor_id),
+      hospital_id: String(item.hospital_id),
+      blood_request_id: item.blood_request_id ? String(item.blood_request_id) : null,
+      pledge_id: item.pledge_id ? String(item.pledge_id) : null,
       blood_group: item.blood_group,
       units: item.units,
       donation_date: item.donation_date ? new Date(item.donation_date).toISOString() : new Date().toISOString(),
@@ -77,12 +67,11 @@ export const getDonorHistory = async (req, res, next) => {
       remarks: item.remarks,
     }));
 
-    // Calculate donor impact stats
+    
     const totalDonations = formattedHistory.length;
     const totalUnits = formattedHistory.reduce((sum, item) => sum + (item.units || 1), 0);
     const livesSaved = totalUnits * 3;
 
-    // Calculate days since last donation for informational display
     let daysSinceLastDonation = null;
     if (donor.last_donation_date) {
       const lastDate = new Date(donor.last_donation_date);
@@ -92,7 +81,6 @@ export const getDonorHistory = async (req, res, next) => {
       }
     }
 
-    // Determine donor badge/tier
     let heroTier = 'New Lifesaver';
     if (totalDonations >= 10) heroTier = 'Platinum Hero';
     else if (totalDonations >= 5) heroTier = 'Gold Guardian';
@@ -100,9 +88,9 @@ export const getDonorHistory = async (req, res, next) => {
     else if (totalDonations >= 1) heroTier = 'Bronze Champion';
 
     return res.status(200).json({
-      donor_id,
+      donor_id: String(donor_id),
       blood_group: donor.blood_group,
-      availability: donor.availability,
+      availability: Boolean(donor.availability),
       last_donation_date: donor.last_donation_date || null,
       days_since_last_donation: daysSinceLastDonation,
       total_donations: totalDonations,
@@ -120,20 +108,14 @@ export const getHospitalHistory = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(hospital_id)) {
-      throw new AppError('Invalid hospital ID', 400);
-    }
-
-    const history = await DonationHistory.find({ hospital_id })
-      .sort({ donation_date: -1 })
-      .lean();
+    const history = await DonationHistory.findByHospitalId(hospital_id);
 
     const formatted = history.map((item) => ({
-      id: item._id.toString(),
-      donor_id: item.donor_id ? item.donor_id.toString() : '',
-      hospital_id: item.hospital_id ? item.hospital_id.toString() : '',
-      blood_request_id: item.blood_request_id ? item.blood_request_id.toString() : null,
-      pledge_id: item.pledge_id ? item.pledge_id.toString() : null,
+      id: String(item.id),
+      donor_id: String(item.donor_id),
+      hospital_id: String(item.hospital_id),
+      blood_request_id: item.blood_request_id ? String(item.blood_request_id) : null,
+      pledge_id: item.pledge_id ? String(item.pledge_id) : null,
       blood_group: item.blood_group,
       units: item.units,
       donation_date: item.donation_date ? new Date(item.donation_date).toISOString() : new Date().toISOString(),
@@ -155,94 +137,57 @@ export const createDirectDonation = async (req, res, next) => {
   try {
     const { donor_id, hospital_id, blood_group, units = 1, remarks, blood_request_id } = req.body;
 
-    if (!donor_id || !mongoose.Types.ObjectId.isValid(donor_id)) {
+    if (!donor_id) {
       throw new AppError('Invalid donor ID', 400);
     }
-    if (!hospital_id || !mongoose.Types.ObjectId.isValid(hospital_id)) {
+    if (!hospital_id) {
       throw new AppError('Invalid hospital ID', 400);
     }
 
     const [donor, hospital, bloodRequest] = await Promise.all([
       Donor.findById(donor_id),
       Hospital.findById(hospital_id),
-      blood_request_id && mongoose.Types.ObjectId.isValid(blood_request_id)
-        ? BloodRequest.findById(blood_request_id)
-        : null,
+      blood_request_id ? BloodRequest.findById(blood_request_id) : null,
     ]);
 
     if (!donor) throw new AppError('Donor not found', 404);
     if (!hospital) throw new AppError('Hospital not found', 404);
 
-    const donorUser = await User.findById(donor.user_id);
-    const donorName = donorUser ? donorUser.name : 'Verified Donor';
-    const group = blood_group || donor.blood_group;
+    const donorName = donor.donor_name || 'Verified Donor';
+    const group = blood_group ? blood_group.toUpperCase() : donor.blood_group;
     const unitsCount = Math.max(1, Number(units) || 1);
     const certificateId = generateCertificateId();
 
-    const historyEntry = await DonationHistory.create({
-      donor_id,
-      hospital_id,
-      blood_request_id: bloodRequest ? bloodRequest._id : (blood_request_id || null),
-      blood_group: group,
-      units: unitsCount,
-      donation_date: new Date(),
-      donor_name: donorName,
-      hospital_name: hospital.hospital_name,
-      hospital_address: hospital.address || '',
-      certificate_id: certificateId,
-      status: 'verified',
-      remarks: remarks || `Clinical donation of ${unitsCount} unit(s) verified by ${hospital.hospital_name}`,
+    let historyEntry = null;
+
+    
+    await withTransaction(async (conn) => {
+      
+      
+      
+      
+      historyEntry = await DonationHistory.create(
+        {
+          donor_id,
+          hospital_id,
+          blood_request_id: bloodRequest ? bloodRequest.id : (blood_request_id || null),
+          blood_group: group,
+          units: unitsCount,
+          donation_date: new Date(),
+          donor_name: donorName,
+          hospital_name: hospital.hospital_name,
+          hospital_address: hospital.address || '',
+          certificate_id: certificateId,
+          status: 'verified',
+          remarks: remarks || `Clinical donation of ${unitsCount} unit(s) verified by ${hospital.hospital_name}`,
+        },
+        conn
+      );
     });
 
-    // Update Blood Inventory
-    await BloodInventory.findOneAndUpdate(
-      { hospital_id, blood_group: group },
-      { $inc: { units: unitsCount } },
-      { upsert: true, new: true }
-    );
-
-    // Update Blood Request status & remaining units if matched
-    if (bloodRequest) {
-      if (!bloodRequest.initial_units_required) {
-        bloodRequest.initial_units_required = Math.max(1, (bloodRequest.units_required || 0) + unitsCount);
-      }
-
-      const historyAgg = await DonationHistory.aggregate([
-        {
-          $match: {
-            blood_request_id: bloodRequest._id,
-            status: { $in: ['verified', 'completed'] },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalUnits: { $sum: '$units' },
-          },
-        },
-      ]);
-
-      const totalUnitsDonated = (historyAgg[0]?.totalUnits || 0);
-      const initialTarget = bloodRequest.initial_units_required;
-      const remainingUnits = Math.max(0, initialTarget - totalUnitsDonated);
-
-      bloodRequest.units_required = remainingUnits;
-
-      if (remainingUnits === 0 || totalUnitsDonated >= initialTarget) {
-        bloodRequest.status = 'fulfilled';
-      }
-
-      await bloodRequest.save();
-    }
-
-    // Update Donor last donation date
-    donor.last_donation_date = new Date().toISOString().split('T')[0];
-    await donor.save();
-
-    // Send clean notification to donor without emojis
     if (donor.user_id) {
       await Notification.create({
-        recipient_id: donor.user_id.toString(),
+        recipient_id: String(donor.user_id),
         recipient_role: 'donor',
         notification_type: 'donation_verified',
         title: `Donation Verified - Certificate #${certificateId}`,
@@ -265,13 +210,13 @@ export const getCertificateById = async (req, res, next) => {
   try {
     const { certificate_id } = req.params;
 
-    const record = await DonationHistory.findOne({ certificate_id }).lean();
+    const record = await DonationHistory.findByCertificateId(certificate_id);
     if (!record) {
       throw new AppError('Certificate not found or invalid certificate ID', 404);
     }
 
     return res.status(200).json({
-      id: record._id.toString(),
+      id: String(record.id),
       certificate_id: record.certificate_id,
       donor_name: record.donor_name,
       hospital_name: record.hospital_name,
@@ -291,18 +236,14 @@ export const deleteDonationHistory = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw new AppError('Invalid record ID', 400);
-    }
-
-    const result = await DonationHistory.deleteOne({ _id: id });
-    if (result.deletedCount === 0) {
+    const deleted = await DonationHistory.delete(id);
+    if (!deleted) {
       throw new AppError('Donation record not found', 404);
     }
 
     return res.status(200).json({
       message: 'Donation history record deleted',
-      id,
+      id: String(id),
     });
   } catch (error) {
     next(error);

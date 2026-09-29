@@ -1,44 +1,89 @@
-import mongoose from 'mongoose';
+import pg from 'pg';
 import { config } from './env.js';
 
-// Global cache for serverless environments (Vercel)
-let cached = global.mongoose;
+const { Pool } = pg;
 
-if (!cached) {
-  cached = global.mongoose = { conn: null, promise: null };
-}
+const isLocal =
+  config.databaseUrl.includes('127.0.0.1') ||
+  config.databaseUrl.includes('localhost');
 
-export const connectDB = async () => {
-  if (process.env.VERCEL && (!config.mongodbUrl || config.mongodbUrl.includes('127.0.0.1') || config.mongodbUrl.includes('localhost'))) {
-    throw new Error('MONGODB_URL or MONGODB_URI environment variable is not set in your Vercel Project Settings.');
-  }
+export const pool = new Pool({
+  connectionString: config.databaseUrl,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
 
-  if (cached.conn && mongoose.connection.readyState === 1) {
-    return cached.conn;
-  }
+pool.on('error', (err) => {
+  console.error('Unexpected idle client error on PostgreSQL pool:', err.message);
+});
 
-  if (!cached.promise) {
-    const opts = {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-      family: 4,
-    };
+export const formatSql = (sql) => {
+  if (!sql.includes('?')) return sql;
+  let index = 1;
+  return sql.replace(/\?/g, () => `$${index++}`);
+};
 
-    cached.promise = mongoose.connect(config.mongodbUrl, opts).then((mongooseInstance) => {
-      console.log(`MongoDB Connected: ${mongooseInstance.connection.host}`);
-      return mongooseInstance;
-    }).catch((err) => {
-      cached.promise = null;
-      console.error('MongoDB Connection Error:', err.message);
-      throw err;
-    });
-  }
+const rawPoolQuery = pool.query.bind(pool);
+
+pool.query = async (sql, params = []) => {
+  const formatted = formatSql(sql);
+  const result = await rawPoolQuery(formatted, params);
+  return [result.rows, result];
+};
+
+export const query = pool.query;
+
+export const withTransaction = async (workFn) => {
+  const client = await pool.connect();
+  const conn = {
+    query: async (sql, params = []) => {
+      const formatted = formatSql(sql);
+      const res = await client.query(formatted, params);
+      return [res.rows, res];
+    },
+  };
 
   try {
-    cached.conn = await cached.promise;
-    return cached.conn;
-  } catch (e) {
-    cached.promise = null;
-    throw e;
+    await client.query('BEGIN');
+    const result = await workFn(conn);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+    }
+    throw error;
+  } finally {
+    client.release();
   }
 };
+
+let initPromise = null;
+
+export const connectDB = async () => {
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      const client = await pool.connect();
+      const res = await client.query(
+        'SELECT 1 + 1 AS health, current_database() AS db_name, version() AS pg_version'
+      );
+      const dbName = res.rows[0]?.db_name || 'postgres';
+      console.log(`PostgreSQL (Supabase) Connected successfully to [${dbName}]`);
+      client.release();
+      return pool;
+    } catch (error) {
+      initPromise = null;
+      console.error('PostgreSQL (Supabase) Connection Error:', error.message);
+      throw error;
+    }
+  })();
+
+  return initPromise;
+};
+
+export default pool;

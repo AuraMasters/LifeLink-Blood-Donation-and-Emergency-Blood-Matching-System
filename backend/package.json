@@ -1,20 +1,25 @@
 {
   "name": "lifelink-backend",
-  "version": "1.0.0",
-  "description": "LifeLink - Blood Donation and Emergency Blood Matching System Backend (Node.js & MongoDB)",
+  "version": "2.0.0",
+  "description": "LifeLink - Intelligent Blood Donation and Emergency Matching Platform Backend (Node.js & PostgreSQL / Supabase)",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "db:setup": "node -e \"import('./src/config/db.js').then(m => m.connectDB()).then(() => process.exit(0))\""
   },
   "keywords": [
     "blood-donation",
     "emergency-matching",
     "nodejs",
     "express",
-    "mongodb",
-    "mongoose"
+    "postgresql",
+    "supabase",
+    "pg",
+    "relational-dbms",
+    "acid-transactions",
+    "triggers"
   ],
   "author": "LifeLink Team",
   "license": "MIT",
@@ -23,7 +28,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "mongoose": "^8.9.5"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

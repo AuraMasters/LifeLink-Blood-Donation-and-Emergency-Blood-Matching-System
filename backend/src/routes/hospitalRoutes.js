@@ -17,6 +17,7 @@ router.route('/')
 
 router.get('/public-map', getPublicHospitalsMap);
 router.get('/public/map', getPublicHospitalsMap);
+router.get('/map/public', getPublicHospitalsMap);
 
 router.route('/user/:user_id')
   .get(getHospitalByUserId)

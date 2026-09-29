@@ -20,9 +20,9 @@ export const getCompatibleDonors = async (req, res, next) => {
       lat,
       lng,
       radius_km = 50,
-      mode = 'all_compatible', // 'exact' | 'all_compatible' | 'universal'
+      mode = 'all_compatible', 
       only_available = 'false',
-      donation_interval = 'all', // 'all' | 'eligible_56' | 'eligible_90' | 'recent_56' | 'first_time'
+      donation_interval = 'all', 
     } = req.query;
 
     const rGroup = (recipient_group || '').toUpperCase().trim();
@@ -35,7 +35,7 @@ export const getCompatibleDonors = async (req, res, next) => {
     const maxRadius = Number(radius_km) || 50;
     const filterAvailable = only_available === 'true';
 
-    // Determine target blood groups
+    
     let targetGroups = [];
     if (mode === 'exact') {
       targetGroups = [rGroup];
@@ -45,22 +45,12 @@ export const getCompatibleDonors = async (req, res, next) => {
       targetGroups = getCompatibleDonorGroups(rGroup, 'rbc');
     }
 
-    // Query Donors
-    const query = {
-      blood_group: { $in: targetGroups },
-    };
-    if (filterAvailable) {
-      query.availability = true;
-    }
-
-    const donors = await Donor.find(query).populate('user_id', 'name email').lean();
-
+    const donors = await Donor.findByGroups(targetGroups, filterAvailable);
     const now = new Date();
 
-    // Compute distance, ETA, match score, and days since last donation
     const enrichedDonors = donors.map((d) => {
-      const donorLat = d.latitude || 0;
-      const donorLng = d.longitude || 0;
+      const donorLat = Number(d.latitude) || 0;
+      const donorLng = Number(d.longitude) || 0;
 
       let distanceKm = null;
       let estimatedMins = null;
@@ -85,9 +75,9 @@ export const getCompatibleDonors = async (req, res, next) => {
       }
 
       return {
-        id: d._id.toString(),
-        user_id: d.user_id?._id?.toString() || d.user_id?.toString() || '',
-        donor_name: d.user_id?.name || 'Anonymous Donor',
+        id: String(d.id),
+        user_id: String(d.user_id),
+        donor_name: d.donor_name || 'Anonymous Donor',
         phone: d.phone,
         blood_group: d.blood_group,
         availability: Boolean(d.availability),
@@ -107,13 +97,11 @@ export const getCompatibleDonors = async (req, res, next) => {
       };
     });
 
-    // Filter by radius if coordinates exist
     let filtered = enrichedDonors;
     if (hospitalLat !== 0 && hospitalLng !== 0 && maxRadius > 0) {
       filtered = filtered.filter((d) => d.distanceKm === null || d.distanceKm <= maxRadius);
     }
 
-    // Filter by last donation interval
     if (donation_interval === 'eligible_56') {
       filtered = filtered.filter((d) => d.days_since_last_donation === null || d.days_since_last_donation >= 56);
     } else if (donation_interval === 'eligible_90') {
@@ -124,10 +112,6 @@ export const getCompatibleDonors = async (req, res, next) => {
       filtered = filtered.filter((d) => !d.last_donation_date);
     }
 
-    // Sort by:
-    // 1. Availability (available first)
-    // 2. Match Score (100% exact first)
-    // 3. Proximity distance (closest first)
     filtered.sort((a, b) => {
       if (a.availability !== b.availability) return a.availability ? -1 : 1;
       if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
@@ -161,22 +145,17 @@ export const getMatchingRequestsForDonor = async (req, res, next) => {
     const donorLng = Number(lng) || 0;
     const maxRadius = Number(radius_km) || 50;
 
-    // Get compatible recipient groups this donor can donate to
     const compatibleRecipientGroups =
       mode === 'exact' ? [dGroup] : getCompatibleRecipientGroups(dGroup);
 
-    // Find searching requests for these groups
-    const requests = await BloodRequest.find({
-      blood_group: { $in: compatibleRecipientGroups },
+    const requests = await BloodRequest.findAll({
+      blood_group: compatibleRecipientGroups,
       status: 'searching',
-    })
-      .populate('hospital_id')
-      .lean();
+    });
 
     const enrichedRequests = requests.map((r) => {
-      const hosp = r.hospital_id || {};
-      const hospLat = hosp.latitude || 0;
-      const hospLng = hosp.longitude || 0;
+      const hospLat = Number(r.hospital_latitude) || 0;
+      const hospLng = Number(r.hospital_longitude) || 0;
 
       let distanceKm = null;
       let estimatedMins = null;
@@ -189,12 +168,12 @@ export const getMatchingRequestsForDonor = async (req, res, next) => {
       const matchEvaluation = calculateMatchScore(dGroup, r.blood_group);
 
       return {
-        id: r._id.toString(),
-        hospital_id: hosp._id ? hosp._id.toString() : '',
-        hospital_name: hosp.hospital_name || 'Medical Center',
-        hospital_phone: hosp.phone || '',
-        hospital_emergency: hosp.emergency_contact || '',
-        hospital_address: hosp.address || '',
+        id: String(r.id),
+        hospital_id: String(r.hospital_id),
+        hospital_name: r.hospital_name || 'Medical Center',
+        hospital_phone: r.hospital_phone || '',
+        hospital_emergency: r.emergency_contact || '',
+        hospital_address: r.hospital_address || '',
         hospital_latitude: hospLat,
         hospital_longitude: hospLng,
         blood_group: r.blood_group,
@@ -211,13 +190,11 @@ export const getMatchingRequestsForDonor = async (req, res, next) => {
       };
     });
 
-    // Filter by radius
     let filtered = enrichedRequests;
     if (donorLat !== 0 && donorLng !== 0 && maxRadius > 0) {
       filtered = enrichedRequests.filter((r) => r.distanceKm === null || r.distanceKm <= maxRadius);
     }
 
-    // Sort by Urgency priority then distance
     const urgencyWeight = { emergency: 3, urgent: 2, normal: 1 };
     filtered.sort((a, b) => {
       const uA = urgencyWeight[a.urgency] || 0;

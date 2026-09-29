@@ -17,8 +17,8 @@ const router = Router();
 router.get('/', (req, res) => {
   res.status(200).json({
     message: 'LifeLink API is running',
-    version: '1.4.0',
-    platform: 'Node.js & MongoDB (Mongoose)',
+    version: '2.0.0',
+    platform: 'Node.js & PostgreSQL (Supabase, ACID Transactions & PL/pgSQL Triggers)',
     status: 'healthy',
     timestamp: new Date().toISOString(),
   });

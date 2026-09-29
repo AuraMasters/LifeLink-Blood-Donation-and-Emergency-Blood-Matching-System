@@ -1,8 +1,6 @@
-import mongoose from 'mongoose';
 import { BloodRequest } from '../models/BloodRequest.js';
 import { Hospital } from '../models/Hospital.js';
 import { Donor } from '../models/Donor.js';
-import { DonationHistory } from '../models/DonationHistory.js';
 import { Notification } from '../models/Notification.js';
 import { getCompatibleDonorGroups, getCompatibleRecipientGroups } from '../utils/bloodMatchingEngine.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
@@ -15,8 +13,8 @@ export const createBloodRequest = async (req, res, next) => {
   try {
     const { hospital_id, blood_group, units_required, urgency, patient_name, required_by } = req.body;
 
-    if (!hospital_id || !mongoose.Types.ObjectId.isValid(hospital_id)) {
-      throw new AppError('Invalid hospital ID', 400);
+    if (!hospital_id) {
+      throw new AppError('Hospital ID is required', 400);
     }
 
     const hospital = await Hospital.findById(hospital_id);
@@ -50,34 +48,31 @@ export const createBloodRequest = async (req, res, next) => {
       status: 'searching',
     });
 
-    // Notify all medically compatible available donors
+    
     try {
       const compatibleGroups = getCompatibleDonorGroups(group, 'rbc');
-      const matchingDonors = await Donor.find({ blood_group: { $in: compatibleGroups }, availability: true }).lean();
-      if (matchingDonors.length > 0) {
-        const notifDocs = matchingDonors.map((d) => {
-          const isExact = d.blood_group === group;
-          return {
-            recipient_id: d.user_id ? d.user_id.toString() : d._id.toString(),
-            recipient_role: 'donor',
-            notification_type: 'emergency_alert',
-            title: isExact
-              ? `Exact Blood Match: ${units} Unit(s) of ${group}`
-              : `Compatible Blood Need: ${units} Unit(s) of ${group} (You: ${d.blood_group})`,
-            message: `${hospital.hospital_name} has broadcasted an urgent requirement for ${group} blood. Your blood group (${d.blood_group}) is medically compatible. Please check details to pledge.`,
-            blood_group: group,
-            request_id: newRequest._id.toString(),
-          };
+      const matchingDonors = await Donor.findByGroups(compatibleGroups, true);
+      for (const d of matchingDonors) {
+        const isExact = d.blood_group === group;
+        await Notification.create({
+          recipient_id: String(d.user_id || d.id),
+          recipient_role: 'donor',
+          notification_type: 'emergency_alert',
+          title: isExact
+            ? `Exact Blood Match: ${units} Unit(s) of ${group}`
+            : `Compatible Blood Need: ${units} Unit(s) of ${group} (You: ${d.blood_group})`,
+          message: `${hospital.hospital_name} has broadcasted an urgent requirement for ${group} blood. Your blood group (${d.blood_group}) is medically compatible. Please check details to pledge.`,
+          blood_group: group,
+          request_id: String(newRequest.id),
         });
-        await Notification.insertMany(notifDocs);
       }
     } catch {
-      // Non-blocking notification dispatch
+      
     }
 
     return res.status(200).json({
-      id: newRequest._id.toString(),
-      hospital_id: newRequest.hospital_id.toString(),
+      id: String(newRequest.id),
+      hospital_id: String(newRequest.hospital_id),
       blood_group: newRequest.blood_group,
       units_required: newRequest.units_required,
       initial_units_required: newRequest.initial_units_required || newRequest.units_required,
@@ -94,23 +89,19 @@ export const createBloodRequest = async (req, res, next) => {
 
 export const getAllBloodRequests = async (req, res, next) => {
   try {
-    const requests = await BloodRequest.find()
-      .populate('hospital_id', 'hospital_name phone emergency_contact address latitude longitude')
-      .sort({ created_at: -1 })
-      .lean();
+    const requests = await BloodRequest.findAll();
 
     const formatted = requests.map((r) => {
-      const hosp = r.hospital_id || {};
       const isSatisfied = (r.units_required <= 0) || r.status === 'fulfilled' || r.status === 'completed';
       return {
-        id: r._id.toString(),
-        hospital_id: hosp._id ? hosp._id.toString() : (r.hospital_id ? String(r.hospital_id) : ''),
-        hospital_name: hosp.hospital_name || 'Medical Center',
-        hospital_phone: hosp.phone || '',
-        emergency_contact: hosp.emergency_contact || '',
-        hospital_address: hosp.address || '',
-        hospital_latitude: hosp.latitude || 0,
-        hospital_longitude: hosp.longitude || 0,
+        id: String(r.id),
+        hospital_id: String(r.hospital_id),
+        hospital_name: r.hospital_name || 'Medical Center',
+        hospital_phone: r.hospital_phone || '',
+        emergency_contact: r.emergency_contact || '',
+        hospital_address: r.hospital_address || '',
+        hospital_latitude: Number(r.hospital_latitude) || 0,
+        hospital_longitude: Number(r.hospital_longitude) || 0,
         blood_group: r.blood_group,
         units_required: r.units_required,
         initial_units_required: r.initial_units_required || r.units_required,
@@ -132,17 +123,13 @@ export const getHospitalBloodRequests = async (req, res, next) => {
   try {
     const { hospital_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(hospital_id)
-      ? { $or: [{ hospital_id: new mongoose.Types.ObjectId(hospital_id) }, { hospital_id: String(hospital_id) }] }
-      : { hospital_id: String(hospital_id) };
-
-    const requests = await BloodRequest.find(query).sort({ created_at: -1 }).lean();
+    const requests = await BloodRequest.findByHospitalId(hospital_id);
 
     const formatted = requests.map((r) => {
       const isSatisfied = (r.units_required <= 0) || r.status === 'fulfilled' || r.status === 'completed';
       return {
-        id: r._id.toString(),
-        hospital_id: r.hospital_id ? r.hospital_id.toString() : '',
+        id: String(r.id),
+        hospital_id: String(r.hospital_id),
         blood_group: r.blood_group,
         units_required: r.units_required,
         initial_units_required: r.initial_units_required || r.units_required,
@@ -164,11 +151,7 @@ export const getDonorBloodRequests = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(donor_id)) {
-      throw new AppError('Invalid donor ID', 400);
-    }
-
-    const donor = await Donor.findById(donor_id).lean();
+    const donor = await Donor.findById(donor_id);
     if (!donor) {
       throw new AppError('Donor not found', 404);
     }
@@ -178,41 +161,32 @@ export const getDonorBloodRequests = async (req, res, next) => {
       throw new AppError('Donor blood group not found', 400);
     }
 
-    // Find all recipient blood groups that this donor is medically compatible to donate to
+    
     const compatibleRecipientGroups = getCompatibleRecipientGroups(donorBloodGroup);
 
-    const requests = await BloodRequest.find({
-      blood_group: { $in: compatibleRecipientGroups },
+    const requests = await BloodRequest.findAll({
+      blood_group: compatibleRecipientGroups,
       status: 'searching',
-    })
-      .populate({
-        path: 'hospital_id',
-        select: 'hospital_name phone emergency_contact address latitude longitude',
-      })
-      .sort({ created_at: -1 })
-      .lean();
-
-    const formatted = requests.map((r) => {
-      const hosp = r.hospital_id || {};
-      return {
-        id: r._id.toString(),
-        hospital_id: hosp._id ? hosp._id.toString() : (r.hospital_id ? r.hospital_id.toString() : ''),
-        hospital_name: hosp.hospital_name || 'Medical Center',
-        hospital_phone: hosp.phone || '',
-        emergency_contact: hosp.emergency_contact || '',
-        hospital_address: hosp.address || '',
-        hospital_latitude: hosp.latitude || 0,
-        hospital_longitude: hosp.longitude || 0,
-        blood_group: r.blood_group,
-        units_required: r.units_required,
-        initial_units_required: r.initial_units_required || r.units_required,
-        urgency: r.urgency,
-        patient_name: r.patient_name || null,
-        required_by: r.required_by || null,
-        status: r.status,
-        created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
-      };
     });
+
+    const formatted = requests.map((r) => ({
+      id: String(r.id),
+      hospital_id: String(r.hospital_id),
+      hospital_name: r.hospital_name || 'Medical Center',
+      hospital_phone: r.hospital_phone || '',
+      emergency_contact: r.emergency_contact || '',
+      hospital_address: r.hospital_address || '',
+      hospital_latitude: Number(r.hospital_latitude) || 0,
+      hospital_longitude: Number(r.hospital_longitude) || 0,
+      blood_group: r.blood_group,
+      units_required: r.units_required,
+      initial_units_required: r.initial_units_required || r.units_required,
+      urgency: r.urgency,
+      patient_name: r.patient_name || null,
+      required_by: r.required_by || null,
+      status: r.status,
+      created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+    }));
 
     return res.status(200).json(formatted);
   } catch (error) {
@@ -224,26 +198,21 @@ export const getBloodRequestById = async (req, res, next) => {
   try {
     const { request_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(request_id)) {
-      throw new AppError('Invalid request ID', 400);
-    }
-
-    const r = await BloodRequest.findById(request_id).populate('hospital_id').lean();
+    const r = await BloodRequest.findById(request_id);
     if (!r) {
       throw new AppError('Blood request not found', 404);
     }
 
-    const hosp = r.hospital_id || {};
     const isSatisfied = (r.units_required <= 0) || r.status === 'fulfilled' || r.status === 'completed';
     return res.status(200).json({
-      id: r._id.toString(),
-      hospital_id: hosp._id ? hosp._id.toString() : (r.hospital_id ? r.hospital_id.toString() : ''),
-      hospital_name: hosp.hospital_name || 'Medical Center',
-      hospital_phone: hosp.phone || '',
-      emergency_contact: hosp.emergency_contact || '',
-      hospital_address: hosp.address || '',
-      hospital_latitude: hosp.latitude || 0,
-      hospital_longitude: hosp.longitude || 0,
+      id: String(r.id),
+      hospital_id: String(r.hospital_id),
+      hospital_name: r.hospital_name || 'Medical Center',
+      hospital_phone: r.hospital_phone || '',
+      emergency_contact: r.emergency_contact || '',
+      hospital_address: r.hospital_address || '',
+      hospital_latitude: Number(r.hospital_latitude) || 0,
+      hospital_longitude: Number(r.hospital_longitude) || 0,
       blood_group: r.blood_group,
       units_required: r.units_required,
       initial_units_required: r.initial_units_required || r.units_required,
@@ -263,16 +232,12 @@ export const updateBloodRequest = async (req, res, next) => {
     const { request_id } = req.params;
     const { blood_group, units_required, urgency, patient_name, required_by, status } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(request_id)) {
-      throw new AppError('Invalid request ID', 400);
-    }
-
     const existingRequest = await BloodRequest.findById(request_id);
     if (!existingRequest) {
       throw new AppError('Blood request not found', 404);
     }
 
-    // Terminal State Lock: If already fulfilled or completed, it CANNOT be changed back to searching or anything else
+    
     if (existingRequest.status === 'fulfilled' || existingRequest.status === 'completed') {
       if (status && status !== existingRequest.status) {
         throw new AppError(
@@ -293,8 +258,8 @@ export const updateBloodRequest = async (req, res, next) => {
 
     if (units_required !== undefined) {
       const units = Number(units_required);
-      if (isNaN(units) || units <= 0) {
-        throw new AppError('Units required must be greater than 0', 400);
+      if (isNaN(units) || units < 0) {
+        throw new AppError('Units required must be 0 or greater', 400);
       }
       updates.units_required = units;
     }
@@ -307,20 +272,14 @@ export const updateBloodRequest = async (req, res, next) => {
       updates.urgency = urg;
     }
 
-    if (patient_name !== undefined) {
-      updates.patient_name = patient_name;
-    }
-
-    if (required_by !== undefined) {
-      updates.required_by = required_by;
-    }
+    if (patient_name !== undefined) updates.patient_name = patient_name;
+    if (required_by !== undefined) updates.required_by = required_by;
 
     if (status !== undefined) {
       const st = status.toLowerCase().trim();
       if (!VALID_STATUSES.includes(st)) {
         throw new AppError('Invalid request status', 400);
       }
-      // If it was already fulfilled or completed, lock the status
       if (existingRequest.status === 'fulfilled' || existingRequest.status === 'completed') {
         updates.status = existingRequest.status;
       } else {
@@ -328,11 +287,11 @@ export const updateBloodRequest = async (req, res, next) => {
       }
     }
 
-    const updated = await BloodRequest.findByIdAndUpdate(request_id, { $set: updates }, { new: true });
+    const updated = await BloodRequest.update(request_id, updates);
 
     return res.status(200).json({
-      id: updated._id.toString(),
-      hospital_id: updated.hospital_id.toString(),
+      id: String(updated.id),
+      hospital_id: String(updated.hospital_id),
       blood_group: updated.blood_group,
       units_required: updated.units_required,
       urgency: updated.urgency,
@@ -350,19 +309,14 @@ export const deleteBloodRequest = async (req, res, next) => {
   try {
     const { request_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(request_id)) {
-      throw new AppError('Invalid request ID', 400);
-    }
-
-    const result = await BloodRequest.deleteOne({ _id: request_id });
-
-    if (result.deletedCount === 0) {
+    const deleted = await BloodRequest.delete(request_id);
+    if (!deleted) {
       throw new AppError('Blood request not found', 404);
     }
 
     return res.status(200).json({
       message: 'Blood request deleted successfully',
-      id: request_id,
+      id: String(request_id),
     });
   } catch (error) {
     next(error);

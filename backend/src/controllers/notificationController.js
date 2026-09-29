@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { Notification } from '../models/Notification.js';
 import { Donor } from '../models/Donor.js';
 import { Hospital } from '../models/Hospital.js';
@@ -10,37 +9,22 @@ export const getUserNotifications = async (req, res, next) => {
     const { role } = req.query;
 
     const recipientIds = [String(user_id)];
-    if (mongoose.Types.ObjectId.isValid(user_id)) {
-      try {
-        const [donor, hospital] = await Promise.all([
-          Donor.findOne({ user_id }).select('_id').lean(),
-          Hospital.findOne({ user_id }).select('_id').lean(),
-        ]);
-        if (donor?._id) recipientIds.push(donor._id.toString());
-        if (hospital?._id) recipientIds.push(hospital._id.toString());
-      } catch {
-        // Non-blocking profile lookup
-      }
+
+    try {
+      const [donor, hospital] = await Promise.all([
+        Donor.findByUserId(user_id),
+        Hospital.findByUserId(user_id),
+      ]);
+      if (donor?.id) recipientIds.push(String(donor.id));
+      if (hospital?.id) recipientIds.push(String(hospital.id));
+    } catch {
+      
     }
 
-    const query = {
-      $or: [
-        { recipient_id: { $in: recipientIds } },
-        { recipient_role: 'all' },
-      ],
-    };
-
-    if (role) {
-      query.$or.push({ recipient_role: role });
-    }
-
-    const notifications = await Notification.find(query)
-      .sort({ created_at: -1 })
-      .limit(50)
-      .lean();
+    const notifications = await Notification.findByRecipient(recipientIds, role, 50);
 
     const formatted = notifications.map((n) => ({
-      id: n._id.toString(),
+      id: String(n.id),
       recipient_id: n.recipient_id,
       recipient_role: n.recipient_role,
       notification_type: n.notification_type,
@@ -48,7 +32,7 @@ export const getUserNotifications = async (req, res, next) => {
       message: n.message,
       blood_group: n.blood_group,
       request_id: n.request_id,
-      is_read: n.is_read,
+      is_read: Boolean(n.is_read),
       created_at: n.created_at ? new Date(n.created_at).toISOString() : new Date().toISOString(),
     }));
 
@@ -67,23 +51,14 @@ export const markNotificationRead = async (req, res, next) => {
   try {
     const { notification_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(notification_id)) {
-      throw new AppError('Invalid notification ID', 400);
-    }
-
-    const notification = await Notification.findByIdAndUpdate(
-      notification_id,
-      { is_read: true },
-      { new: true }
-    );
-
+    const notification = await Notification.markRead(notification_id);
     if (!notification) {
       throw new AppError('Notification not found', 404);
     }
 
     return res.status(200).json({
       message: 'Notification marked as read',
-      id: notification._id.toString(),
+      id: String(notification.id),
       is_read: true,
     });
   } catch (error) {
@@ -96,23 +71,18 @@ export const markAllRead = async (req, res, next) => {
     const { user_id } = req.params;
 
     const recipientIds = [String(user_id)];
-    if (mongoose.Types.ObjectId.isValid(user_id)) {
-      try {
-        const [donor, hospital] = await Promise.all([
-          Donor.findOne({ user_id }).select('_id').lean(),
-          Hospital.findOne({ user_id }).select('_id').lean(),
-        ]);
-        if (donor?._id) recipientIds.push(donor._id.toString());
-        if (hospital?._id) recipientIds.push(hospital._id.toString());
-      } catch {
-        // Non-blocking lookup
-      }
+    try {
+      const [donor, hospital] = await Promise.all([
+        Donor.findByUserId(user_id),
+        Hospital.findByUserId(user_id),
+      ]);
+      if (donor?.id) recipientIds.push(String(donor.id));
+      if (hospital?.id) recipientIds.push(String(hospital.id));
+    } catch {
+      
     }
 
-    await Notification.updateMany(
-      { recipient_id: { $in: recipientIds }, is_read: false },
-      { is_read: true }
-    );
+    await Notification.markAllRead(recipientIds);
 
     return res.status(200).json({
       message: 'All notifications marked as read',
@@ -126,18 +96,14 @@ export const deleteNotification = async (req, res, next) => {
   try {
     const { notification_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(notification_id)) {
-      throw new AppError('Invalid notification ID', 400);
-    }
-
-    const result = await Notification.deleteOne({ _id: notification_id });
-    if (result.deletedCount === 0) {
+    const deleted = await Notification.delete(notification_id);
+    if (!deleted) {
       throw new AppError('Notification not found', 404);
     }
 
     return res.status(200).json({
       message: 'Notification removed',
-      id: notification_id,
+      id: String(notification_id),
     });
   } catch (error) {
     next(error);
@@ -163,7 +129,18 @@ export const createNotification = async (req, res, next) => {
       is_read: false,
     });
 
-    return res.status(201).json(item);
+    return res.status(201).json({
+      id: String(item.id),
+      recipient_id: item.recipient_id,
+      recipient_role: item.recipient_role,
+      notification_type: item.notification_type,
+      title: item.title,
+      message: item.message,
+      blood_group: item.blood_group,
+      request_id: item.request_id,
+      is_read: Boolean(item.is_read),
+      created_at: item.created_at ? new Date(item.created_at).toISOString() : new Date().toISOString(),
+    });
   } catch (error) {
     next(error);
   }

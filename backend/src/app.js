@@ -12,14 +12,13 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    maxAge: 86400, // Cache preflight requests for 24h to avoid OPTIONS roundtrips
+    maxAge: 86400,
   })
 );
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serverless DB connection middleware (ensures DB is connected on Vercel)
 app.use(async (req, res, next) => {
   try {
     await connectDB();

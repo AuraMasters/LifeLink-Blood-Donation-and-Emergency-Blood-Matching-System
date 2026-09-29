@@ -188,7 +188,7 @@ export async function request<T>(endpoint: string, options: RequestConfig = {}):
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
-        ...(options.headers as Record<string, string> || {}),
+        ...(options.headers as Record<string, string>),
       };
 
       const session = getSession();

@@ -1,5 +1,5 @@
 export class AppError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode = 500) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
@@ -18,25 +18,19 @@ export const errorHandler = (err, req, res, next) => {
   let statusCode = err.statusCode || 500;
   let detail = err.message || 'Internal Server Error';
 
-  if (err.name === 'CastError') {
+  if (err.code === '23505') {
+    statusCode = 409;
+    detail = err.detail || 'A record with this unique identifier already exists';
+  } else if (err.code === '23503') {
     statusCode = 400;
-    detail = `Invalid ${err.path || 'ID'} format`;
-  }
-
-  if (err.code === 11000) {
+    detail = err.detail || 'Referenced foreign record does not exist';
+  } else if (err.code === '23514') {
     statusCode = 400;
-    const field = Object.keys(err.keyValue || {})[0] || 'field';
-    detail = `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`;
-  }
-
-  if (err.name === 'ValidationError') {
+    detail = 'Submitted data violates database integrity check constraints';
+  } else if (err.code === '22P02') {
     statusCode = 400;
-    detail = Object.values(err.errors)
-      .map((e) => e.message)
-      .join(', ');
-  }
-
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    detail = 'Invalid input syntax for database field type';
+  } else if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     statusCode = 400;
     detail = 'Invalid JSON payload provided';
   }

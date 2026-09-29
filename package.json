@@ -1,7 +1,7 @@
 {
   "name": "lifelink-blood-matching-system",
   "version": "1.0.0",
-  "description": "LifeLink - Blood Donation and Emergency Blood Matching Platform (Node.js + MongoDB + React TypeScript)",
+  "description": "LifeLink - Blood Donation and Emergency Blood Matching Platform (Node.js + PostgreSQL / Supabase + React TypeScript)",
   "private": true,
   "scripts": {
     "dev:backend": "npm --prefix backend run dev",
@@ -14,7 +14,8 @@
     "emergency-matching",
     "fullstack",
     "nodejs",
-    "mongodb",
+    "postgresql",
+    "supabase",
     "react",
     "vite",
     "tailwindcss"
