@@ -1,12 +1,7 @@
 import pg from 'pg';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { config } from './env.js';
 
 const { Pool } = pg;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const isLocal =
   config.databaseUrl.includes('127.0.0.1') ||
@@ -76,8 +71,6 @@ export const connectDB = async () => {
       const dbName = res.rows[0]?.db_name || 'postgres';
       console.log(`PostgreSQL (Supabase) Connected successfully to [${dbName}]`);
       client.release();
-
-      await ensureSchema();
       return pool;
     } catch (error) {
       initPromise = null;
@@ -87,25 +80,6 @@ export const connectDB = async () => {
   })();
 
   return initPromise;
-};
-
-const ensureSchema = async () => {
-  try {
-    const res = await pool.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users'"
-    );
-    if (res.rows.length === 0) {
-      console.log('Tables not found. Applying PostgreSQL schema from schema.sql...');
-      const schemaPath = path.resolve(__dirname, '../db/schema.sql');
-      if (fs.existsSync(schemaPath)) {
-        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-        await pool.query(schemaSql);
-        console.log('PostgreSQL schema and PL/pgSQL triggers initialized successfully.');
-      }
-    }
-  } catch (err) {
-    console.error('PostgreSQL schema check notice:', err.message);
-  }
 };
 
 export default pool;
