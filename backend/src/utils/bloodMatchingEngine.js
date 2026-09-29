@@ -1,15 +1,5 @@
-/**
- * Clinical Blood Compatibility Matching Engine
- * Implements ABO and Rhesus (RhD) Factor Compatibility for:
- * - Red Blood Cells (RBC) / Whole Blood
- * - Plasma (FFP)
- * - Platelets
- */
-
 export const VALID_BLOOD_GROUPS = ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'];
 
-// Red Blood Cell / Whole Blood Compatibility Matrix
-// Key = Recipient Blood Group -> Value = Array of Compatible Donor Blood Groups
 export const RBC_RECIPIENT_TO_DONORS = {
   'O-': ['O-'],
   'O+': ['O-', 'O+'],
@@ -18,13 +8,11 @@ export const RBC_RECIPIENT_TO_DONORS = {
   'B-': ['O-', 'B-'],
   'B+': ['O-', 'O+', 'B-', 'B+'],
   'AB-': ['O-', 'A-', 'B-', 'AB-'],
-  'AB+': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], // Universal Recipient
+  'AB+': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], 
 };
 
-// Red Blood Cell Donor to Compatible Recipients
-// Key = Donor Blood Group -> Value = Array of Compatible Recipient Blood Groups
 export const RBC_DONOR_TO_RECIPIENTS = {
-  'O-': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], // Universal Donor
+  'O-': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], 
   'O+': ['O+', 'A+', 'B+', 'AB+'],
   'A-': ['A-', 'A+', 'AB-', 'AB+'],
   'A+': ['A+', 'AB+'],
@@ -34,24 +22,17 @@ export const RBC_DONOR_TO_RECIPIENTS = {
   'AB+': ['AB+'],
 };
 
-// Plasma (FFP) Compatibility Matrix
 export const PLASMA_RECIPIENT_TO_DONORS = {
-  'O-': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], // Universal Plasma Recipient
+  'O-': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'], 
   'O+': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'],
   'A-': ['A-', 'A+', 'AB-', 'AB+'],
   'A+': ['A-', 'A+', 'AB-', 'AB+'],
   'B-': ['B-', 'B+', 'AB-', 'AB+'],
   'B+': ['B-', 'B+', 'AB-', 'AB+'],
   'AB-': ['AB-', 'AB+'],
-  'AB+': ['AB-', 'AB+'], // Universal Plasma Donor is AB
+  'AB+': ['AB-', 'AB+'], 
 };
 
-/**
- * Returns all compatible donor blood groups for a given recipient.
- * @param {string} recipientGroup - e.g. 'A+'
- * @param {'rbc'|'plasma'} [component='rbc']
- * @returns {string[]}
- */
 export const getCompatibleDonorGroups = (recipientGroup, component = 'rbc') => {
   const grp = (recipientGroup || '').toUpperCase().trim();
   if (component === 'plasma') {
@@ -60,23 +41,11 @@ export const getCompatibleDonorGroups = (recipientGroup, component = 'rbc') => {
   return RBC_RECIPIENT_TO_DONORS[grp] || [grp];
 };
 
-/**
- * Returns all compatible recipient blood groups that a donor can donate to.
- * @param {string} donorGroup - e.g. 'O-'
- * @returns {string[]}
- */
 export const getCompatibleRecipientGroups = (donorGroup) => {
   const grp = (donorGroup || '').toUpperCase().trim();
   return RBC_DONOR_TO_RECIPIENTS[grp] || [grp];
 };
 
-/**
- * Checks if a donor blood group is compatible with a recipient blood group.
- * @param {string} donorGroup
- * @param {string} recipientGroup
- * @param {'rbc'|'plasma'} [component='rbc']
- * @returns {boolean}
- */
 export const isBloodCompatible = (donorGroup, recipientGroup, component = 'rbc') => {
   const dGrp = (donorGroup || '').toUpperCase().trim();
   const rGrp = (recipientGroup || '').toUpperCase().trim();
@@ -86,13 +55,6 @@ export const isBloodCompatible = (donorGroup, recipientGroup, component = 'rbc')
   return compatibleDonors.includes(dGrp);
 };
 
-/**
- * Calculates a match score and tier between a donor and a recipient.
- * 100: Exact ABO/Rh Match
- * 90: Universal Donor (O-)
- * 80: Medically Compatible Iso-group
- * 0: Incompatible
- */
 export const calculateMatchScore = (donorGroup, recipientGroup) => {
   const d = (donorGroup || '').toUpperCase().trim();
   const r = (recipientGroup || '').toUpperCase().trim();

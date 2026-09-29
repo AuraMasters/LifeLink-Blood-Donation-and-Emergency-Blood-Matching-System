@@ -67,7 +67,7 @@ export const getDonorHistory = async (req, res, next) => {
       remarks: item.remarks,
     }));
 
-    // Calculate donor impact stats
+    
     const totalDonations = formattedHistory.length;
     const totalUnits = formattedHistory.reduce((sum, item) => sum + (item.units || 1), 0);
     const livesSaved = totalUnits * 3;
@@ -160,12 +160,12 @@ export const createDirectDonation = async (req, res, next) => {
 
     let historyEntry = null;
 
-    // Multi-table write inside an ACID transaction
+    
     await withTransaction(async (conn) => {
-      // NOTE: Trigger `trg_after_donation_history_insert` automatically updates:
-      //  - blood_inventory (increments units)
-      //  - donors.last_donation_date
-      //  - blood_requests.units_required & status
+      
+      
+      
+      
       historyEntry = await DonationHistory.create(
         {
           donor_id,

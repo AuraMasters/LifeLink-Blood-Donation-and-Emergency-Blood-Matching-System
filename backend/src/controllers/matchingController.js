@@ -20,9 +20,9 @@ export const getCompatibleDonors = async (req, res, next) => {
       lat,
       lng,
       radius_km = 50,
-      mode = 'all_compatible', // 'exact' | 'all_compatible' | 'universal'
+      mode = 'all_compatible', 
       only_available = 'false',
-      donation_interval = 'all', // 'all' | 'eligible_56' | 'eligible_90' | 'recent_56' | 'first_time'
+      donation_interval = 'all', 
     } = req.query;
 
     const rGroup = (recipient_group || '').toUpperCase().trim();
@@ -35,7 +35,7 @@ export const getCompatibleDonors = async (req, res, next) => {
     const maxRadius = Number(radius_km) || 50;
     const filterAvailable = only_available === 'true';
 
-    // Determine target blood groups
+    
     let targetGroups = [];
     if (mode === 'exact') {
       targetGroups = [rGroup];

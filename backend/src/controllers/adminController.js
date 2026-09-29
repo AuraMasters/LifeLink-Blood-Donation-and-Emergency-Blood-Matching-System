@@ -9,10 +9,6 @@ import { DonationPledge } from '../models/DonationPledge.js';
 import { Notification } from '../models/Notification.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 
-/**
- * GET /admin/overview
- * Comprehensive system telemetry, metrics, blood reserves, and recent activity
- */
 export const getAdminOverview = async (req, res, next) => {
   try {
     const [
@@ -108,10 +104,6 @@ export const getAdminOverview = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/system-health
- * Diagnostic health endpoint for PostgreSQL / Supabase & node process
- */
 export const getSystemHealth = async (req, res, next) => {
   try {
     const [
@@ -164,10 +156,6 @@ export const getSystemHealth = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/users
- * Returns all user accounts with associated role profile details populated
- */
 export const getAdminUsers = async (req, res, next) => {
   try {
     const users = await User.findAll();
@@ -202,10 +190,6 @@ export const getAdminUsers = async (req, res, next) => {
   }
 };
 
-/**
- * POST /admin/users
- * Admin creates user with optional sub-profile (donor or hospital) inside an ACID transaction
- */
 export const createAdminUser = async (req, res, next) => {
   try {
     const { name, email, password, role, blood_group, phone, address, emergency_contact, latitude, longitude } =
@@ -260,7 +244,7 @@ export const createAdminUser = async (req, res, next) => {
           },
           conn
         );
-        // Note: Trigger `trg_after_hospital_insert` automatically creates blood inventory slots!
+        
       }
     });
 
@@ -279,10 +263,6 @@ export const createAdminUser = async (req, res, next) => {
   }
 };
 
-/**
- * PUT /admin/users/:user_id
- * Admin updates user credentials and profile
- */
 export const updateAdminUser = async (req, res, next) => {
   try {
     const { user_id } = req.params;
@@ -322,10 +302,6 @@ export const updateAdminUser = async (req, res, next) => {
   }
 };
 
-/**
- * DELETE /admin/users/:user_id
- * Admin deletes a user account with cascading clean-up
- */
 export const deleteAdminUser = async (req, res, next) => {
   try {
     const { user_id } = req.params;
@@ -336,9 +312,9 @@ export const deleteAdminUser = async (req, res, next) => {
     }
 
     await withTransaction(async (conn) => {
-      // Clean notifications
+      
       await conn.query('DELETE FROM notifications WHERE recipient_id = ?', [String(user_id)]);
-      // Deleting user cascades all foreign keys (donors, hospitals, inventory, requests, pledges, history)
+      
       await User.delete(user_id, conn);
     });
 
@@ -351,9 +327,6 @@ export const deleteAdminUser = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/donors
- */
 export const getAdminDonors = async (req, res, next) => {
   try {
     const donors = await Donor.findAll();
@@ -380,9 +353,6 @@ export const getAdminDonors = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/hospitals
- */
 export const getAdminHospitals = async (req, res, next) => {
   try {
     const [hospitals, inventories] = await Promise.all([Hospital.findAll(), BloodInventory.findAll()]);
@@ -422,9 +392,6 @@ export const getAdminHospitals = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/requests
- */
 export const getAdminRequests = async (req, res, next) => {
   try {
     const requests = await BloodRequest.findAll();
@@ -452,9 +419,6 @@ export const getAdminRequests = async (req, res, next) => {
   }
 };
 
-/**
- * GET /admin/certificates
- */
 export const getAdminCertificates = async (req, res, next) => {
   try {
     const history = await DonationHistory.findAll();

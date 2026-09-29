@@ -31,7 +31,7 @@ export const createHospital = async (req, res, next) => {
       }
     }
 
-    // Trigger `trg_after_hospital_insert` automatically initializes blood_inventory!
+    
     const hospital = await Hospital.create({
       user_id,
       hospital_name: hospital_name?.trim(),
@@ -81,7 +81,7 @@ export const getPublicHospitalsMap = async (req, res, next) => {
       BloodRequest.findAll({ status: 'searching' }),
     ]);
 
-    // Index inventory by hospital_id
+    
     const inventoryMap = {};
     inventories.forEach((item) => {
       const hId = String(item.hospital_id);
@@ -89,7 +89,7 @@ export const getPublicHospitalsMap = async (req, res, next) => {
       inventoryMap[hId][item.blood_group] = item.units;
     });
 
-    // Index requests by hospital_id
+    
     const requestMap = {};
     activeRequests.forEach((reqItem) => {
       const hId = String(reqItem.hospital_id);

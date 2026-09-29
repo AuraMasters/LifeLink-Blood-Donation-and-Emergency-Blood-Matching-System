@@ -18,7 +18,7 @@ export const getUserNotifications = async (req, res, next) => {
       if (donor?.id) recipientIds.push(String(donor.id));
       if (hospital?.id) recipientIds.push(String(hospital.id));
     } catch {
-      // Non-blocking profile lookup
+      
     }
 
     const notifications = await Notification.findByRecipient(recipientIds, role, 50);
@@ -79,7 +79,7 @@ export const markAllRead = async (req, res, next) => {
       if (donor?.id) recipientIds.push(String(donor.id));
       if (hospital?.id) recipientIds.push(String(hospital.id));
     } catch {
-      // Non-blocking lookup
+      
     }
 
     await Notification.markAllRead(recipientIds);

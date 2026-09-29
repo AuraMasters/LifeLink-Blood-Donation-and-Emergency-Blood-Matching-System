@@ -163,7 +163,7 @@ export const deleteUser = async (req, res, next) => {
       throw new AppError('User not found', 404);
     }
 
-    // Cascade deletion executed inside a transaction with foreign key guarantees
+    
     let donorDeleted = false;
     let hospitalDeleted = false;
 
@@ -174,7 +174,7 @@ export const deleteUser = async (req, res, next) => {
       const hospital = await Hospital.findByUserId(user_id, conn);
       if (hospital) hospitalDeleted = true;
 
-      // Deleting user will cascade to donors, hospitals, inventory, requests via FK constraints
+      
       await User.delete(user_id, conn);
     });
 

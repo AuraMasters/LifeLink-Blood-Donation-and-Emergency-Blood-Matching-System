@@ -37,7 +37,7 @@ export const createPledge = async (req, res, next) => {
     const donorName = donor.donor_name || 'Volunteer Donor';
     const donorPhone = donor.phone || '';
 
-    // Check if donor already has an active pledge for this request
+    
     const existingPledge = await DonationPledge.findActive(request_id, donor_id);
 
     if (existingPledge) {
@@ -60,7 +60,7 @@ export const createPledge = async (req, res, next) => {
       notes: notes || '',
     });
 
-    // Notify Hospital of the incoming pledge
+    
     const hospital = await Hospital.findById(bloodRequest.hospital_id);
     if (hospital && hospital.user_id) {
       await Notification.create({
@@ -221,18 +221,18 @@ export const completePledgeAndVerifyDonation = async (req, res, next) => {
     const hospitalAddress = hospital ? hospital.address : '';
     const certificateId = generateCertificateId();
 
-    // Execute multi-table updates inside an explicit ACID Transaction
+    
     let historyEntry = null;
 
     await withTransaction(async (conn) => {
-      // 1. Mark pledge completed
+      
       await DonationPledge.update(pledge_id, { status: 'completed' }, conn);
 
-      // 2. Insert verified DonationHistory
-      // NOTE: Trigger `trg_after_donation_history_insert` automatically updates:
-      //  - blood_inventory (increments units)
-      //  - donors.last_donation_date
-      //  - blood_requests.units_required & status
+      
+      
+      
+      
+      
       historyEntry = await DonationHistory.create(
         {
           donor_id: pledge.donor_id,
@@ -253,7 +253,7 @@ export const completePledgeAndVerifyDonation = async (req, res, next) => {
       );
     });
 
-    // Send celebration & certificate Notification to Donor
+    
     const donorRecipientId = donor ? String(donor.user_id || donor.id) : '';
     if (donorRecipientId) {
       await Notification.create({

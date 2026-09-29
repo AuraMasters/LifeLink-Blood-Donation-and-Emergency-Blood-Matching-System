@@ -8,7 +8,6 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Determine SSL requirement (Required for Supabase / Cloud, disabled for local development)
 const isLocal =
   config.databaseUrl.includes('127.0.0.1') ||
   config.databaseUrl.includes('localhost');
@@ -25,38 +24,18 @@ pool.on('error', (err) => {
   console.error('Unexpected idle client error on PostgreSQL pool:', err.message);
 });
 
-/**
- * Automatically converts '?' placeholders to PostgreSQL native '$1, $2, ...' syntax
- * if standard '?' marks are present.
- */
 export const formatSql = (sql) => {
   if (!sql.includes('?')) return sql;
   let index = 1;
   return sql.replace(/\?/g, () => `$${index++}`);
 };
 
-/**
- * Execute a query against the PostgreSQL connection pool
- * Returns [rows, result] tuple for uniform destructuring.
- *
- * @param {string} sql
- * @param {Array} params
- * @returns {Promise<[Array, Object]>}
- */
 export const query = async (sql, params = []) => {
   const formatted = formatSql(sql);
   const result = await pool.query(formatted, params);
   return [result.rows, result];
 };
 
-/**
- * Execute a unit of work inside an explicit ACID PostgreSQL Transaction
- * Handles BEGIN, COMMIT, ROLLBACK, and client connection release.
- *
- * @template T
- * @param {(conn: { query: (sql: string, params?: Array) => Promise<[Array, Object]> }) => Promise<T>} workFn
- * @returns {Promise<T>}
- */
 export const withTransaction = async (workFn) => {
   const client = await pool.connect();
   const conn = {
@@ -76,7 +55,6 @@ export const withTransaction = async (workFn) => {
     try {
       await client.query('ROLLBACK');
     } catch {
-      // Ignore rollback failure if already terminated
     }
     throw error;
   } finally {
@@ -86,9 +64,6 @@ export const withTransaction = async (workFn) => {
 
 let initPromise = null;
 
-/**
- * Verifies the database connection and runs initial schema initialization if needed
- */
 export const connectDB = async () => {
   if (initPromise) return initPromise;
 
@@ -114,9 +89,6 @@ export const connectDB = async () => {
   return initPromise;
 };
 
-/**
- * Ensures required schema tables exist in the PostgreSQL database
- */
 const ensureSchema = async () => {
   try {
     const res = await pool.query(

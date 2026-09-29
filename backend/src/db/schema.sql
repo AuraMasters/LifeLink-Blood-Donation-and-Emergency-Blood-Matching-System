@@ -1,10 +1,3 @@
--- LifeLink - Intelligent Blood Donation & Emergency Matching Platform
--- Fully Normalized PostgreSQL Schema (1NF, 2NF, 3NF, BCNF)
--- Engineered for Supabase & PostgreSQL with Constraints, Foreign Keys, and PL/pgSQL Triggers
-
--- -------------------------------------------------------------
--- 1. Table: users (Supertype: Authentication & Core Credentials)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -18,9 +11,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
--- -------------------------------------------------------------
--- 2. Table: donors (Subtype: Biological & Spatial Donor Profile)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS donors (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -38,9 +28,6 @@ CREATE TABLE IF NOT EXISTS donors (
 CREATE INDEX IF NOT EXISTS idx_donors_blood_avail ON donors(blood_group, availability);
 CREATE INDEX IF NOT EXISTS idx_donors_user_id ON donors(user_id);
 
--- -------------------------------------------------------------
--- 3. Table: hospitals (Subtype: Healthcare Facility Infrastructure)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS hospitals (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -57,9 +44,6 @@ CREATE TABLE IF NOT EXISTS hospitals (
 CREATE INDEX IF NOT EXISTS idx_hospitals_phone ON hospitals(phone);
 CREATE INDEX IF NOT EXISTS idx_hospitals_user_id ON hospitals(user_id);
 
--- -------------------------------------------------------------
--- 4. Table: blood_inventory (Normalized 8-Group Stock Matrix)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS blood_inventory (
     id SERIAL PRIMARY KEY,
     hospital_id INT NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
@@ -71,9 +55,6 @@ CREATE TABLE IF NOT EXISTS blood_inventory (
 
 CREATE INDEX IF NOT EXISTS idx_inventory_hosp_blood ON blood_inventory(hospital_id, blood_group);
 
--- -------------------------------------------------------------
--- 5. Table: blood_requests (Emergency Triage & Blood Demands)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS blood_requests (
     id SERIAL PRIMARY KEY,
     hospital_id INT NOT NULL REFERENCES hospitals(id) ON DELETE CASCADE,
@@ -91,9 +72,6 @@ CREATE TABLE IF NOT EXISTS blood_requests (
 CREATE INDEX IF NOT EXISTS idx_requests_status_group ON blood_requests(status, blood_group);
 CREATE INDEX IF NOT EXISTS idx_requests_hospital ON blood_requests(hospital_id);
 
--- -------------------------------------------------------------
--- 6. Table: donation_pledges (Donor Commitments to Requests)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS donation_pledges (
     id SERIAL PRIMARY KEY,
     request_id INT NOT NULL REFERENCES blood_requests(id) ON DELETE CASCADE,
@@ -114,9 +92,6 @@ CREATE INDEX IF NOT EXISTS idx_pledges_req_status ON donation_pledges(request_id
 CREATE INDEX IF NOT EXISTS idx_pledges_donor_status ON donation_pledges(donor_id, status);
 CREATE INDEX IF NOT EXISTS idx_pledges_hospital ON donation_pledges(hospital_id);
 
--- -------------------------------------------------------------
--- 7. Table: donation_history (Verified Ledger & Certificates)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS donation_history (
     id SERIAL PRIMARY KEY,
     donor_id INT NOT NULL REFERENCES donors(id) ON DELETE CASCADE,
@@ -140,9 +115,6 @@ CREATE INDEX IF NOT EXISTS idx_history_donor_date ON donation_history(donor_id, 
 CREATE INDEX IF NOT EXISTS idx_history_hospital ON donation_history(hospital_id);
 CREATE INDEX IF NOT EXISTS idx_history_cert ON donation_history(certificate_id);
 
--- -------------------------------------------------------------
--- 8. Table: notifications (Dispatch Alerts & Communications)
--- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     recipient_id VARCHAR(100) NOT NULL,
@@ -159,11 +131,6 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id, is_read);
 
--- -------------------------------------------------------------
--- TRIGGERS & PL/pgSQL FUNCTIONS
--- -------------------------------------------------------------
-
--- Trigger 1: Automatically initialize 8 inventory slots on hospital registration
 CREATE OR REPLACE FUNCTION fn_after_hospital_insert()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -188,22 +155,21 @@ AFTER INSERT ON hospitals
 FOR EACH ROW
 EXECUTE FUNCTION fn_after_hospital_insert();
 
--- Trigger 2: Automatically update inventory, donor date, and request status on donation verification
 CREATE OR REPLACE FUNCTION fn_after_donation_history_insert()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- 1. Increment hospital blood inventory
+    
     INSERT INTO blood_inventory (hospital_id, blood_group, units)
     VALUES (NEW.hospital_id, NEW.blood_group, NEW.units)
     ON CONFLICT (hospital_id, blood_group)
     DO UPDATE SET units = blood_inventory.units + EXCLUDED.units, updated_at = CURRENT_TIMESTAMP;
 
-    -- 2. Update donor's last donation date
+    
     UPDATE donors
     SET last_donation_date = CAST(NEW.donation_date AS DATE)
     WHERE id = NEW.donor_id;
 
-    -- 3. If connected to a blood request, decrement units and mark fulfilled if satisfied
+    
     IF NEW.blood_request_id IS NOT NULL THEN
         UPDATE blood_requests
         SET units_required = GREATEST(0, units_required - NEW.units),
@@ -224,7 +190,6 @@ AFTER INSERT ON donation_history
 FOR EACH ROW
 EXECUTE FUNCTION fn_after_donation_history_insert();
 
--- Trigger 3: Prevent reverting fulfilled / completed requests to searching
 CREATE OR REPLACE FUNCTION fn_before_blood_request_update()
 RETURNS TRIGGER AS $$
 BEGIN

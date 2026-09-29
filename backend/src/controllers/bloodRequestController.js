@@ -48,7 +48,7 @@ export const createBloodRequest = async (req, res, next) => {
       status: 'searching',
     });
 
-    // Notify all medically compatible available donors
+    
     try {
       const compatibleGroups = getCompatibleDonorGroups(group, 'rbc');
       const matchingDonors = await Donor.findByGroups(compatibleGroups, true);
@@ -67,7 +67,7 @@ export const createBloodRequest = async (req, res, next) => {
         });
       }
     } catch {
-      // Non-blocking notification dispatch
+      
     }
 
     return res.status(200).json({
@@ -161,7 +161,7 @@ export const getDonorBloodRequests = async (req, res, next) => {
       throw new AppError('Donor blood group not found', 400);
     }
 
-    // Find all recipient blood groups that this donor is medically compatible to donate to
+    
     const compatibleRecipientGroups = getCompatibleRecipientGroups(donorBloodGroup);
 
     const requests = await BloodRequest.findAll({
@@ -237,7 +237,7 @@ export const updateBloodRequest = async (req, res, next) => {
       throw new AppError('Blood request not found', 404);
     }
 
-    // Terminal State Lock
+    
     if (existingRequest.status === 'fulfilled' || existingRequest.status === 'completed') {
       if (status && status !== existingRequest.status) {
         throw new AppError(
