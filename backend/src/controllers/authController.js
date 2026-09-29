@@ -11,7 +11,6 @@ export const loginUser = async (req, res, next) => {
       throw new AppError('Email and password are required', 400);
     }
 
-    // Basic Master Admin Login Bypass
     const trimmedInput = (email || '').toLowerCase().trim();
     const isAdminBypass =
       (trimmedInput === 'admin' || trimmedInput === 'admin@lifelink.org' || trimmedInput === 'admin@admin.com') &&
@@ -20,7 +19,7 @@ export const loginUser = async (req, res, next) => {
     if (isAdminBypass) {
       return res.status(200).json({
         message: 'Admin bypass authenticated successfully',
-        user_id: 'admin_master_root_id',
+        user_id: '1',
         name: 'System Administrator',
         email: 'admin@lifelink.org',
         role: 'admin',
@@ -29,7 +28,7 @@ export const loginUser = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ email: trimmedInput }).lean();
+    const user = await User.findByEmail(trimmedInput);
 
     if (!user) {
       throw new AppError('Invalid email or password', 401);
@@ -45,21 +44,21 @@ export const loginUser = async (req, res, next) => {
     let bloodGroup = null;
 
     if (user.role === 'donor') {
-      const donor = await Donor.findOne({ user_id: user._id }).lean();
+      const donor = await Donor.findByUserId(user.id);
       if (donor) {
-        profileId = donor._id.toString();
+        profileId = String(donor.id);
         bloodGroup = donor.blood_group;
       }
     } else if (user.role === 'hospital') {
-      const hospital = await Hospital.findOne({ user_id: user._id }).lean();
+      const hospital = await Hospital.findByUserId(user.id);
       if (hospital) {
-        profileId = hospital._id.toString();
+        profileId = String(hospital.id);
       }
     }
 
     return res.status(200).json({
       message: 'Login successful',
-      user_id: user._id.toString(),
+      user_id: String(user.id),
       name: user.name,
       email: user.email,
       role: user.role,

@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { Donor } from '../models/Donor.js';
 import { User } from '../models/User.js';
 import { Hospital } from '../models/Hospital.js';
@@ -10,10 +9,6 @@ export const createDonor = async (req, res, next) => {
     const { user_id } = req.params;
     const { blood_group, phone, address, latitude, longitude, availability, last_donation_date } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(user_id)) {
-      throw new AppError('Invalid user ID', 400);
-    }
-
     const user = await User.findById(user_id);
     if (!user) {
       throw new AppError('User not found', 404);
@@ -23,15 +18,15 @@ export const createDonor = async (req, res, next) => {
       throw new AppError('User role is not donor', 400);
     }
 
-    const existingDonor = await Donor.findOne({ user_id });
+    const existingDonor = await Donor.findByUserId(user_id);
     if (existingDonor) {
       throw new AppError('Donor profile already exists', 400);
     }
 
     const donor = await Donor.create({
       user_id,
-      blood_group: blood_group ? blood_group.toUpperCase() : undefined,
-      phone,
+      blood_group: blood_group ? blood_group.toUpperCase() : 'O+',
+      phone: phone || '',
       address: address || '',
       latitude: Number(latitude) || 0,
       longitude: Number(longitude) || 0,
@@ -41,8 +36,8 @@ export const createDonor = async (req, res, next) => {
 
     return res.status(200).json({
       message: 'Donor created successfully',
-      donor_id: donor._id.toString(),
-      user_id,
+      donor_id: String(donor.id),
+      user_id: String(user_id),
     });
   } catch (error) {
     next(error);
@@ -51,30 +46,21 @@ export const createDonor = async (req, res, next) => {
 
 export const getDonors = async (req, res, next) => {
   try {
-    const donors = await Donor.find()
-      .populate({
-        path: 'user_id',
-        select: 'name email',
-      })
-      .sort({ created_at: -1 })
-      .lean();
+    const donors = await Donor.findAll();
 
-    const formatted = donors.map((d) => {
-      const userObj = d.user_id && typeof d.user_id === 'object' ? d.user_id : null;
-      return {
-        id: d._id.toString(),
-        user_id: userObj ? userObj._id.toString() : (d.user_id ? d.user_id.toString() : ''),
-        donor_name: userObj ? userObj.name : 'Registered Donor',
-        email: userObj ? userObj.email : '',
-        blood_group: d.blood_group,
-        phone: d.phone,
-        address: d.address || '',
-        latitude: d.latitude,
-        longitude: d.longitude,
-        availability: d.availability,
-        last_donation_date: d.last_donation_date || null,
-      };
-    });
+    const formatted = donors.map((d) => ({
+      id: String(d.id),
+      user_id: String(d.user_id),
+      donor_name: d.donor_name || 'Registered Donor',
+      email: d.email || '',
+      blood_group: d.blood_group,
+      phone: d.phone,
+      address: d.address || '',
+      latitude: Number(d.latitude) || 0,
+      longitude: Number(d.longitude) || 0,
+      availability: Boolean(d.availability),
+      last_donation_date: d.last_donation_date || null,
+    }));
 
     return res.status(200).json(formatted);
   } catch (error) {
@@ -86,31 +72,22 @@ export const getDonorByUserId = async (req, res, next) => {
   try {
     const { user_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(user_id)
-      ? { $or: [{ user_id: new mongoose.Types.ObjectId(user_id) }, { user_id: String(user_id) }] }
-      : { user_id: String(user_id) };
-
-    const donor = await Donor.findOne(query)
-      .populate({ path: 'user_id', select: 'name email' })
-      .lean();
-
+    const donor = await Donor.findByUserId(user_id);
     if (!donor) {
       throw new AppError('Donor profile not found', 404);
     }
 
-    const userObj = donor.user_id && typeof donor.user_id === 'object' ? donor.user_id : null;
-
     return res.status(200).json({
-      id: donor._id.toString(),
-      user_id: userObj ? userObj._id.toString() : (donor.user_id ? donor.user_id.toString() : ''),
-      donor_name: userObj ? userObj.name : 'Registered Donor',
-      email: userObj ? userObj.email : '',
+      id: String(donor.id),
+      user_id: String(donor.user_id),
+      donor_name: donor.donor_name || 'Registered Donor',
+      email: donor.email || '',
       blood_group: donor.blood_group,
       phone: donor.phone,
       address: donor.address || '',
-      latitude: donor.latitude,
-      longitude: donor.longitude,
-      availability: donor.availability,
+      latitude: Number(donor.latitude) || 0,
+      longitude: Number(donor.longitude) || 0,
+      availability: Boolean(donor.availability),
       last_donation_date: donor.last_donation_date || null,
     });
   } catch (error) {
@@ -122,31 +99,22 @@ export const getDonorById = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(donor_id)
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(donor_id) }, { _id: String(donor_id) }] }
-      : { _id: String(donor_id) };
-
-    const donor = await Donor.findOne(query)
-      .populate({ path: 'user_id', select: 'name email' })
-      .lean();
-
+    const donor = await Donor.findById(donor_id);
     if (!donor) {
       throw new AppError('Donor not found', 404);
     }
 
-    const userObj = donor.user_id && typeof donor.user_id === 'object' ? donor.user_id : null;
-
     return res.status(200).json({
-      id: donor._id.toString(),
-      user_id: userObj ? userObj._id.toString() : (donor.user_id ? donor.user_id.toString() : ''),
-      donor_name: userObj ? userObj.name : 'Registered Donor',
-      email: userObj ? userObj.email : '',
+      id: String(donor.id),
+      user_id: String(donor.user_id),
+      donor_name: donor.donor_name || 'Registered Donor',
+      email: donor.email || '',
       blood_group: donor.blood_group,
       phone: donor.phone,
       address: donor.address || '',
-      latitude: donor.latitude,
-      longitude: donor.longitude,
-      availability: donor.availability,
+      latitude: Number(donor.latitude) || 0,
+      longitude: Number(donor.longitude) || 0,
+      availability: Boolean(donor.availability),
       last_donation_date: donor.last_donation_date || null,
     });
   } catch (error) {
@@ -158,20 +126,12 @@ export const updateDonor = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
 
-    const query = mongoose.Types.ObjectId.isValid(donor_id)
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(donor_id) }, { _id: String(donor_id) }] }
-      : { _id: String(donor_id) };
-
     const updates = { ...req.body };
     if (updates.blood_group) {
       updates.blood_group = updates.blood_group.toUpperCase();
     }
 
-    const donor = await Donor.findOneAndUpdate(query, updates, {
-      new: true,
-      runValidators: true,
-    });
-
+    const donor = await Donor.update(donor_id, updates);
     if (!donor) {
       throw new AppError('Donor not found', 404);
     }
@@ -179,14 +139,14 @@ export const updateDonor = async (req, res, next) => {
     return res.status(200).json({
       message: 'Donor updated successfully',
       donor: {
-        id: donor._id.toString(),
-        user_id: donor.user_id ? donor.user_id.toString() : '',
+        id: String(donor.id),
+        user_id: String(donor.user_id),
         blood_group: donor.blood_group,
         phone: donor.phone,
         address: donor.address || '',
-        latitude: donor.latitude,
-        longitude: donor.longitude,
-        availability: donor.availability,
+        latitude: Number(donor.latitude) || 0,
+        longitude: Number(donor.longitude) || 0,
+        availability: Boolean(donor.availability),
         last_donation_date: donor.last_donation_date || null,
       },
     });
@@ -199,19 +159,14 @@ export const deleteDonor = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(donor_id)) {
-      throw new AppError('Invalid donor ID', 400);
-    }
-
-    const result = await Donor.deleteOne({ _id: donor_id });
-
-    if (result.deletedCount === 0) {
+    const deleted = await Donor.delete(donor_id);
+    if (!deleted) {
       throw new AppError('Donor not found', 404);
     }
 
     return res.status(200).json({
       message: 'Donor deleted successfully',
-      donor_id,
+      donor_id: String(donor_id),
     });
   } catch (error) {
     next(error);
@@ -221,11 +176,7 @@ export const deleteDonor = async (req, res, next) => {
 export const sendDirectDonorRequest = async (req, res, next) => {
   try {
     const { donor_id } = req.params;
-    const { hospital_id, message, units_needed = 1, urgency = 'emergency' } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(donor_id)) {
-      throw new AppError('Invalid donor ID', 400);
-    }
+    const { hospital_id, message } = req.body;
 
     const [donor, hospital] = await Promise.all([
       Donor.findById(donor_id),
@@ -240,7 +191,7 @@ export const sendDirectDonorRequest = async (req, res, next) => {
       `CLINICAL DIRECTIVE: ${hospital.hospital_name} is in critical need of your blood type (${donor.blood_group}). Please check your matching requests or contact the facility triage desk immediately at ${hospital.emergency_contact || hospital.phone}.`;
 
     const notification = await Notification.create({
-      recipient_id: donor.user_id ? donor.user_id.toString() : donor._id.toString(),
+      recipient_id: String(donor.user_id || donor.id),
       recipient_role: 'donor',
       notification_type: 'direct_urgent_request',
       title: `Emergency Clinical Directive from ${hospital.hospital_name}`,
