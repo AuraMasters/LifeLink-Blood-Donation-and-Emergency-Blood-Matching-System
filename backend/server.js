@@ -2,26 +2,29 @@ import app from './src/app.js';
 import { connectDB } from './src/config/db.js';
 import { config } from './src/config/env.js';
 
-const startServer = async () => {
-  try {
-    await connectDB();
+if (!process.env.VERCEL) {
+  const startServer = async () => {
+    try {
+      await connectDB();
 
-    const server = app.listen(config.port, '0.0.0.0', () => {
-      console.log(`Server listening on port ${config.port} (0.0.0.0)`);
-    });
-
-    const shutdown = () => {
-      server.close(() => {
-        process.exit(0);
+      const server = app.listen(config.port, '0.0.0.0', () => {
+        console.log(`Server listening on port ${config.port} (0.0.0.0)`);
       });
-    };
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-  } catch (error) {
-    console.error('Server startup error:', error.message);
-    process.exit(1);
-  }
-};
+      const shutdown = () => {
+        server.close(() => {
+          process.exit(0);
+        });
+      };
 
-startServer();
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+    } catch (error) {
+      console.error('Server startup error:', error.message);
+    }
+  };
+
+  startServer();
+}
+
+export default app;
