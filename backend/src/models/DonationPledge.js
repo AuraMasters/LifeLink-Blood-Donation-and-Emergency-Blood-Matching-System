@@ -1,85 +1,172 @@
-import mongoose from 'mongoose';
+import { pool } from '../config/db.js';
 
-const VALID_BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const VALID_PLEDGE_STATUSES = ['pledged', 'acknowledged', 'completed', 'cancelled'];
-
-const donationPledgeSchema = new mongoose.Schema(
-  {
-    request_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'BloodRequest',
-      required: [true, 'Request ID is required'],
-    },
-    hospital_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Hospital',
-      required: [true, 'Hospital ID is required'],
-    },
-    donor_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Donor',
-      required: [true, 'Donor ID is required'],
-    },
-    donor_user_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'Donor User ID is required'],
-    },
-    donor_name: {
-      type: String,
-      required: [true, 'Donor name is required'],
-      trim: true,
-    },
-    donor_phone: {
-      type: String,
-      required: [true, 'Donor phone is required'],
-      trim: true,
-    },
-    blood_group: {
-      type: String,
-      required: [true, 'Blood group is required'],
-      enum: VALID_BLOOD_GROUPS,
-      uppercase: true,
-      trim: true,
-    },
-    status: {
-      type: String,
-      enum: VALID_PLEDGE_STATUSES,
-      default: 'pledged',
-      lowercase: true,
-    },
-    estimated_arrival: {
-      type: String,
-      default: 'Within 1 hour',
-      trim: true,
-    },
-    notes: {
-      type: String,
-      default: '',
-      trim: true,
-    },
-  },
-  {
-    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
-    versionKey: false,
+export class DonationPledge {
+  static async findById(id, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT p.*,
+              h.hospital_name,
+              h.phone AS hospital_phone,
+              h.emergency_contact,
+              h.address AS hospital_address,
+              h.latitude AS hospital_latitude,
+              h.longitude AS hospital_longitude,
+              r.blood_group AS req_blood_group,
+              r.urgency,
+              r.patient_name
+       FROM donation_pledges p
+       JOIN hospitals h ON p.hospital_id = h.id
+       JOIN blood_requests r ON p.request_id = r.id
+       WHERE p.id = ?`,
+      [id]
+    );
+    return rows[0] || null;
   }
-);
 
-donationPledgeSchema.index({ hospital_id: 1, status: 1 });
-donationPledgeSchema.index({ request_id: 1, status: 1 });
-donationPledgeSchema.index({ donor_id: 1, status: 1 });
+  static async findByRequestId(requestId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT p.*,
+              h.hospital_name,
+              h.phone AS hospital_phone,
+              h.emergency_contact,
+              h.address AS hospital_address,
+              h.latitude AS hospital_latitude,
+              h.longitude AS hospital_longitude
+       FROM donation_pledges p
+       JOIN hospitals h ON p.hospital_id = h.id
+       WHERE p.request_id = ?
+       ORDER BY p.created_at DESC`,
+      [requestId]
+    );
+    return rows;
+  }
 
-donationPledgeSchema.set('toJSON', {
-  transform: (doc, ret) => {
-    ret.id = ret._id.toString();
-    ret.request_id = ret.request_id ? ret.request_id.toString() : '';
-    ret.hospital_id = ret.hospital_id ? ret.hospital_id.toString() : '';
-    ret.donor_id = ret.donor_id ? ret.donor_id.toString() : '';
-    ret.donor_user_id = ret.donor_user_id ? ret.donor_user_id.toString() : '';
-    ret.created_at = ret.created_at ? new Date(ret.created_at).toISOString() : new Date().toISOString();
-    delete ret._id;
-    return ret;
-  },
-});
+  static async findByHospitalId(hospitalId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT p.*,
+              h.hospital_name,
+              h.phone AS hospital_phone,
+              h.emergency_contact,
+              h.address AS hospital_address,
+              h.latitude AS hospital_latitude,
+              h.longitude AS hospital_longitude
+       FROM donation_pledges p
+       JOIN hospitals h ON p.hospital_id = h.id
+       WHERE p.hospital_id = ?
+       ORDER BY p.created_at DESC`,
+      [hospitalId]
+    );
+    return rows;
+  }
 
-export const DonationPledge = mongoose.model('DonationPledge', donationPledgeSchema, 'donation_pledges');
+  static async findByDonorId(donorId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT p.*,
+              h.hospital_name,
+              h.phone AS hospital_phone,
+              h.emergency_contact,
+              h.address AS hospital_address,
+              h.latitude AS hospital_latitude,
+              h.longitude AS hospital_longitude,
+              r.blood_group AS req_blood_group,
+              r.urgency,
+              r.patient_name
+       FROM donation_pledges p
+       JOIN hospitals h ON p.hospital_id = h.id
+       JOIN blood_requests r ON p.request_id = r.id
+       WHERE p.donor_id = ?
+       ORDER BY p.created_at DESC`,
+      [donorId]
+    );
+    return rows;
+  }
+
+  static async findActive(requestId, donorId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT * FROM donation_pledges
+       WHERE request_id = ? AND donor_id = ? AND status IN ('pledged', 'acknowledged')`,
+      [requestId, donorId]
+    );
+    return rows[0] || null;
+  }
+
+  static async findAll(connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT p.*,
+              h.hospital_name,
+              h.phone AS hospital_phone,
+              h.emergency_contact
+       FROM donation_pledges p
+       JOIN hospitals h ON p.hospital_id = h.id
+       ORDER BY p.created_at DESC`
+    );
+    return rows;
+  }
+
+  static async create(
+    {
+      request_id,
+      hospital_id,
+      donor_id,
+      donor_user_id,
+      donor_name,
+      donor_phone,
+      blood_group,
+      status = 'pledged',
+      estimated_arrival = 'Within 1 hour',
+      notes = '',
+    },
+    connection = pool
+  ) {
+    const [rows] = await connection.query(
+      `INSERT INTO donation_pledges
+       (request_id, hospital_id, donor_id, donor_user_id, donor_name, donor_phone, blood_group, status, estimated_arrival, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+      [
+        request_id,
+        hospital_id,
+        donor_id,
+        donor_user_id,
+        donor_name.trim(),
+        donor_phone.trim(),
+        blood_group.toUpperCase(),
+        (status || 'pledged').toLowerCase(),
+        estimated_arrival || 'Within 1 hour',
+        notes || '',
+      ]
+    );
+    return await this.findById(rows[0].id, connection);
+  }
+
+  static async update(id, fields, connection = pool) {
+    const allowed = ['status', 'estimated_arrival', 'notes'];
+    const updates = [];
+    const values = [];
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (allowed.includes(key) && value !== undefined) {
+        updates.push(`${key} = ?`);
+        if (key === 'status') values.push(value.toLowerCase());
+        else values.push(value);
+      }
+    }
+
+    if (updates.length === 0) return await this.findById(id, connection);
+
+    values.push(id);
+    await connection.query(`UPDATE donation_pledges SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, values);
+    return await this.findById(id, connection);
+  }
+
+  static async delete(id, connection = pool) {
+    const [rows, result] = await connection.query('DELETE FROM donation_pledges WHERE id = ?', [id]);
+    return (result?.rowCount || 0) > 0;
+  }
+
+  static async count(connection = pool) {
+    const [rows] = await connection.query('SELECT COUNT(*) AS total FROM donation_pledges');
+    return parseInt(rows[0]?.total || '0', 10);
+  }
+}
+
+export default DonationPledge;

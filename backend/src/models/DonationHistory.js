@@ -1,101 +1,124 @@
-import mongoose from 'mongoose';
+import { pool } from '../config/db.js';
 
-const VALID_BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const VALID_HISTORY_STATUSES = ['verified', 'completed'];
-
-const donationHistorySchema = new mongoose.Schema(
-  {
-    donor_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Donor',
-      required: [true, 'Donor ID is required'],
-    },
-    hospital_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Hospital',
-      required: [true, 'Hospital ID is required'],
-    },
-    blood_request_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'BloodRequest',
-      default: null,
-    },
-    pledge_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'DonationPledge',
-      default: null,
-    },
-    blood_group: {
-      type: String,
-      required: [true, 'Blood group is required'],
-      enum: VALID_BLOOD_GROUPS,
-      uppercase: true,
-      trim: true,
-    },
-    units: {
-      type: Number,
-      required: [true, 'Units donated is required'],
-      default: 1,
-      min: 1,
-    },
-    donation_date: {
-      type: Date,
-      default: Date.now,
-    },
-    donor_name: {
-      type: String,
-      required: [true, 'Donor name is required'],
-      trim: true,
-    },
-    hospital_name: {
-      type: String,
-      required: [true, 'Hospital name is required'],
-      trim: true,
-    },
-    hospital_address: {
-      type: String,
-      default: '',
-      trim: true,
-    },
-    certificate_id: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-    },
-    status: {
-      type: String,
-      enum: VALID_HISTORY_STATUSES,
-      default: 'verified',
-      lowercase: true,
-    },
-    remarks: {
-      type: String,
-      default: 'Routine clinical donation verified for emergency transfusion',
-      trim: true,
-    },
-  },
-  {
-    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
-    versionKey: false,
+export class DonationHistory {
+  static async findById(id, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT h.*,
+              d.user_id AS donor_user_id,
+              d.phone AS donor_phone
+       FROM donation_history h
+       JOIN donors d ON h.donor_id = d.id
+       WHERE h.id = ?`,
+      [id]
+    );
+    return rows[0] || null;
   }
-);
 
-donationHistorySchema.index({ donor_id: 1, donation_date: -1 });
-donationHistorySchema.index({ hospital_id: 1 });
+  static async findByCertificateId(certificateId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT h.*,
+              d.user_id AS donor_user_id,
+              d.phone AS donor_phone
+       FROM donation_history h
+       JOIN donors d ON h.donor_id = d.id
+       WHERE h.certificate_id = ?`,
+      [certificateId.trim()]
+    );
+    return rows[0] || null;
+  }
 
-donationHistorySchema.set('toJSON', {
-  transform: (doc, ret) => {
-    ret.id = ret._id.toString();
-    ret.donor_id = ret.donor_id ? ret.donor_id.toString() : '';
-    ret.hospital_id = ret.hospital_id ? ret.hospital_id.toString() : '';
-    ret.blood_request_id = ret.blood_request_id ? ret.blood_request_id.toString() : null;
-    ret.pledge_id = ret.pledge_id ? ret.pledge_id.toString() : null;
-    ret.donation_date = ret.donation_date ? new Date(ret.donation_date).toISOString() : new Date().toISOString();
-    ret.created_at = ret.created_at ? new Date(ret.created_at).toISOString() : new Date().toISOString();
-    delete ret._id;
-    return ret;
-  },
-});
+  static async findByDonorId(donorId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT * FROM donation_history
+       WHERE donor_id = ?
+       ORDER BY donation_date DESC`,
+      [donorId]
+    );
+    return rows;
+  }
 
-export const DonationHistory = mongoose.model('DonationHistory', donationHistorySchema, 'donation_history');
+  static async findByHospitalId(hospitalId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT * FROM donation_history
+       WHERE hospital_id = ?
+       ORDER BY donation_date DESC`,
+      [hospitalId]
+    );
+    return rows;
+  }
+
+  static async findAll(connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT * FROM donation_history
+       ORDER BY donation_date DESC`
+    );
+    return rows;
+  }
+
+  static async create(
+    {
+      donor_id,
+      hospital_id,
+      blood_request_id = null,
+      pledge_id = null,
+      blood_group,
+      units = 1,
+      donation_date = new Date(),
+      donor_name,
+      hospital_name,
+      hospital_address = '',
+      certificate_id,
+      status = 'verified',
+      remarks = null,
+    },
+    connection = pool
+  ) {
+    const unitsCount = Math.max(1, Number(units) || 1);
+    const dateVal = donation_date instanceof Date ? donation_date : new Date(donation_date);
+
+    const [rows] = await connection.query(
+      `INSERT INTO donation_history
+       (donor_id, hospital_id, blood_request_id, pledge_id, blood_group, units, donation_date, donor_name, hospital_name, hospital_address, certificate_id, status, remarks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+      [
+        donor_id,
+        hospital_id,
+        blood_request_id || null,
+        pledge_id || null,
+        blood_group.toUpperCase(),
+        unitsCount,
+        dateVal,
+        donor_name.trim(),
+        hospital_name.trim(),
+        hospital_address ? hospital_address.trim() : '',
+        certificate_id.trim(),
+        (status || 'verified').toLowerCase(),
+        remarks || null,
+      ]
+    );
+    return await this.findById(rows[0].id, connection);
+  }
+
+  static async delete(id, connection = pool) {
+    const [rows, result] = await connection.query('DELETE FROM donation_history WHERE id = ?', [id]);
+    return (result?.rowCount || 0) > 0;
+  }
+
+  static async count(connection = pool) {
+    const [rows] = await connection.query('SELECT COUNT(*) AS total FROM donation_history');
+    return parseInt(rows[0]?.total || '0', 10);
+  }
+
+  static async getUnitsByRequest(requestId, connection = pool) {
+    const [rows] = await connection.query(
+      `SELECT SUM(units) AS totalUnits
+       FROM donation_history
+       WHERE blood_request_id = ? AND status IN ('verified', 'completed')`,
+      [requestId]
+    );
+    return Number(rows[0]?.totalunits) || 0;
+  }
+}
+
+export default DonationHistory;
