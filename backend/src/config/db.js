@@ -10,7 +10,7 @@ const isLocal =
 export const pool = new Pool({
   connectionString: config.databaseUrl,
   ssl: isLocal ? false : { rejectUnauthorized: false },
-  max: 20,
+  max: process.env.VERCEL ? 5 : 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 });
