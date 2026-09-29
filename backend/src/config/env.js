@@ -11,10 +11,11 @@ dotenv.config();
 export const config = {
   port: parseInt(process.env.PORT || '8000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  mongodbUrl:
-    process.env.MONGODB_URL ||
-    process.env.MONGODB_URI ||
-    process.env.MONGO_URI ||
-    'mongodb://127.0.0.1:27017/lifelink',
+  databaseUrl:
+    process.env.DATABASE_URL ||
+    process.env.SUPABASE_DB_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.PG_CONNECTION_STRING ||
+    'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
 };
