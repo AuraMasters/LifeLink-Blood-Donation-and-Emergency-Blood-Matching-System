@@ -142,25 +142,25 @@ sequenceDiagram
     participant MW as Express Middleware (CORS / Helmet)
     participant Router as API Router
     participant Controller as Domain Controller
-    participant Model as Mongoose ODM
-    participant DB as MongoDB Database
-    participant ErrorMW as Global Error Handler
+    participant Model as PostgreSQL Model Layer
+    participant DB as PostgreSQL Database (Supabase)
+    participant ErrorMW as Global SQLSTATE Error Handler
 
     Client->>MW: HTTP Request (Method, URL, Headers, Body)
     MW->>MW: Apply Security Headers and Verify CORS Origin
     MW->>MW: Parse JSON Body Payload
     MW->>Router: Route Dispatch (/blood-requests, /users)
     Router->>Controller: Invoke Controller Action
-    Controller->>Controller: Validate Payload and Constraints
+    Controller->>Controller: Validate Payload and Domain Rules
 
     alt Validation Failure
         Controller-->>ErrorMW: next(new AppError(message, 400))
         ErrorMW-->>Client: JSON Error Response (400 Bad Request)
     else Validation Success
-        Controller->>Model: Execute Query / Mutation
-        Model->>DB: MongoDB Wire Protocol Command
-        DB-->>Model: Raw BSON Document / Result
-        Model-->>Controller: Hydrated Model Instance
+        Controller->>Model: Execute Query / ACID Transaction
+        Model->>DB: PostgreSQL Parameterized Query ($1, $2, ...)
+        DB-->>Model: SQL Result Rows / Affected RowCount
+        Model-->>Controller: Domain Entities / DTOs
         Controller-->>Client: JSON Response (200 / 201 Created)
     end
 ```
@@ -230,13 +230,13 @@ classDiagram
     direction TB
 
     class User {
-        -ObjectId _id
+        -int id
         +string name
         +string email
         -string password_hash
         +string role
-        +Date created_at
-        +Date updated_at
+        +Timestamp created_at
+        +Timestamp updated_at
         +register(userData) Promise~User~
         +login(credentials) Promise~Session~
         +updateProfile(data) Promise~User~
@@ -244,69 +244,105 @@ classDiagram
     }
 
     class Donor {
-        -ObjectId _id
-        -ObjectId user_id
+        -int id
+        -int user_id
         +string blood_group
         +string phone
-        +float latitude
-        +float longitude
+        +decimal latitude
+        +decimal longitude
         +boolean availability
-        +string last_donation_date
-        +Date created_at
-        +Date updated_at
+        +Date last_donation_date
+        +Timestamp created_at
+        +Timestamp updated_at
         +toggleAvailability() Promise~Donor~
         +getCompatibleRequests() Promise~List~
         +updateLocation(lat, lng) Promise~Donor~
-        +getNearbyHospitals(radiusKm) Promise~List~
     }
 
     class Hospital {
-        -ObjectId _id
-        -ObjectId user_id
+        -int id
+        -int user_id
         +string hospital_name
         +string phone
         +string emergency_contact
-        +float latitude
-        +float longitude
+        +decimal latitude
+        +decimal longitude
         +string address
-        +Date created_at
-        +Date updated_at
+        +Timestamp created_at
+        +Timestamp updated_at
         +createBloodRequest(reqData) Promise~BloodRequest~
         +updateStock(bloodGroup, units) Promise~BloodInventory~
         +getStockMatrix() Promise~List~
-        +getEmergencyHistory() Promise~List~
     }
 
     class BloodInventory {
-        -ObjectId _id
-        -ObjectId hospital_id
+        -int id
+        -int hospital_id
         +string blood_group
         +int units
-        +Date updated_at
+        +Timestamp updated_at
         +setUnits(count) Promise~BloodInventory~
         +incrementUnits(delta) Promise~BloodInventory~
         +decrementUnits(delta) Promise~BloodInventory~
-        +checkStockThreshold(minLimit) boolean
     }
 
     class BloodRequest {
-        -ObjectId _id
-        -ObjectId hospital_id
+        -int id
+        -int hospital_id
         +string blood_group
         +int units_required
+        +int initial_units_required
         +string urgency
         +string patient_name
         +string required_by
         +string status
-        +Date created_at
-        +Date updated_at
+        +Timestamp created_at
+        +Timestamp updated_at
         +broadcastEmergency() Promise~void~
         +findMatchingDonors() Promise~List~
         +transitionStatus(newStatus) Promise~BloodRequest~
     }
 
+    class DonationPledge {
+        -int id
+        -int request_id
+        -int hospital_id
+        -int donor_id
+        -int donor_user_id
+        +string donor_name
+        +string donor_phone
+        +string blood_group
+        +string status
+        +string estimated_arrival
+        +string notes
+        +Timestamp created_at
+        +Timestamp updated_at
+        +createPledge() Promise~DonationPledge~
+        +updateStatus(status) Promise~DonationPledge~
+    }
+
+    class DonationHistory {
+        -int id
+        -int donor_id
+        -int hospital_id
+        -int blood_request_id
+        -int pledge_id
+        +string blood_group
+        +int units
+        +Timestamp donation_date
+        +string donor_name
+        +string hospital_name
+        +string hospital_address
+        +string certificate_id
+        +string status
+        +string remarks
+        +Timestamp created_at
+        +Timestamp updated_at
+        +verifyAndRecord() Promise~DonationHistory~
+    }
+
     class Notification {
-        -ObjectId _id
+        -int id
         +string recipient_id
         +string recipient_role
         +string notification_type
@@ -315,124 +351,150 @@ classDiagram
         +string blood_group
         +string request_id
         +boolean is_read
-        +Date created_at
-        +Date updated_at
+        +Timestamp created_at
+        +Timestamp updated_at
         +markAsRead() Promise~Notification~
         +dispatchAlert() Promise~void~
     }
 
-    class BloodCompatibilityMatrix {
-        <<utility>>
-        +getDonorCompatibleGroups(recipientType) String[]
-        +getRecipientCompatibleGroups(donorType) String[]
-        +isCompatible(donorType, recipientType) boolean
-        +calculateHaversineDistance(lat1, lon1, lat2, lon2) float
-    }
-
-    class CascadeDeletionManager {
-        <<service>>
-        +executeCascade(userId) Promise~CascadeReport~
-        +verifyReferentialIntegrity() Promise~boolean~
-    }
-
-    User <|-- Donor : specializes (role = 'donor')
-    User <|-- Hospital : specializes (role = 'hospital')
-    Hospital "1" *-- "8" BloodInventory : maintains stock
-    Hospital "1" *-- "0..*" BloodRequest : initiates
-    BloodRequest ..> BloodCompatibilityMatrix : evaluates matching
-    BloodRequest "1" ..> "0..*" Notification : generates alerts
-    Donor "1" o-- "0..*" Notification : receives
-    Hospital "1" o-- "0..*" Notification : receives
-    User ..> CascadeDeletionManager : triggers cleanup
+    User <|-- Donor : specializes (user_id)
+    User <|-- Hospital : specializes (user_id)
+    Hospital "1" *-- "8" BloodInventory : maintains
+    Hospital "1" *-- "0..*" BloodRequest : broadcasts
+    BloodRequest "1" o-- "0..*" DonationPledge : receives
+    Donor "1" o-- "0..*" DonationPledge : commits
+    Donor "1" o-- "0..*" DonationHistory : achieves
+    Hospital "1" o-- "0..*" DonationHistory : records
+    DonationPledge "0..1" --o "1" DonationHistory : completes
+    BloodRequest "0..1" --o "0..*" DonationHistory : fulfills
 ```
 
 ---
 
 ## Entity-Relationship (ER) Diagram and DBMS Foundations
 
-The LifeLink system data model is engineered following formal Database Management System (DBMS) principles, combining relational structural integrity with high-concurrency document-store performance.
+The LifeLink system data model is strictly normalized (1NF, 2NF, 3NF, BCNF) and executed on PostgreSQL with foreign keys, checks, unique constraints, and automated triggers.
 
 ### Enhanced Crow's Foot Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
-    USER ||--o| DONOR : "specializes into donor profile"
-    USER ||--o| HOSPITAL : "specializes into hospital profile"
-    HOSPITAL ||--o{ BLOOD_INVENTORY : "maintains stock matrix"
-    HOSPITAL ||--o{ BLOOD_REQUEST : "broadcasts emergency needs"
-    DONOR ||--o{ NOTIFICATION : "receives targeted alerts"
-    HOSPITAL ||--o{ NOTIFICATION : "receives status dispatches"
-    BLOOD_REQUEST ||--o{ NOTIFICATION : "triggers alert generation"
+    USER ||--o| DONOR : "specializes (1:1)"
+    USER ||--o| HOSPITAL : "specializes (1:1)"
+    HOSPITAL ||--|{ BLOOD_INVENTORY : "stocks (1:8)"
+    HOSPITAL ||--o{ BLOOD_REQUEST : "broadcasts (1:N)"
+    BLOOD_REQUEST ||--o{ DONATION_PLEDGE : "receives (1:N)"
+    DONOR ||--o{ DONATION_PLEDGE : "commits (1:N)"
+    DONOR ||--o{ DONATION_HISTORY : "earns (1:N)"
+    HOSPITAL ||--o{ DONATION_HISTORY : "verifies (1:N)"
+    BLOOD_REQUEST ||--o{ DONATION_HISTORY : "fulfilled_by (1:N)"
+    DONATION_PLEDGE ||--o| DONATION_HISTORY : "completed_by (1:1)"
 
     USER {
-        ObjectId _id PK "Primary Key (Auto-generated BSON ObjectId)"
-        string name "User full legal name"
-        string email UK "Unique lowercase user email address"
-        string password_hash "Bcrypt salted password digest"
-        string role "Role enum: donor | hospital | admin"
-        date created_at "System generation timestamp"
-        date updated_at "System modification timestamp"
+        int id PK "SERIAL Primary Key"
+        string name "Full legal name"
+        string email UK "Unique email address"
+        string password_hash "Bcrypt salted digest"
+        string role "Role: donor | hospital | admin"
+        timestamp created_at "Account creation timestamp"
+        timestamp updated_at "Account modification timestamp"
     }
 
     DONOR {
-        ObjectId _id PK "Primary Key (Auto-generated ObjectId)"
-        ObjectId user_id FK "Foreign Key referencing users._id"
+        int id PK "SERIAL Primary Key"
+        int user_id FK "FK referencing users(id) ON DELETE CASCADE"
         string blood_group "ABO/Rh Blood Group: A+, A-, B+, B-, AB+, AB-, O+, O-"
         string phone "Contact telephone number"
-        float latitude "Geographical GPS Latitude"
-        float longitude "Geographical GPS Longitude"
+        decimal latitude "Geographical GPS Latitude"
+        decimal longitude "Geographical GPS Longitude"
         boolean availability "Active donation readiness flag"
-        string last_donation_date "Date of preceding donation"
-        date created_at "Profile creation timestamp"
-        date updated_at "Profile modification timestamp"
+        date last_donation_date "Date of preceding donation"
+        timestamp created_at "Profile creation timestamp"
+        timestamp updated_at "Profile modification timestamp"
     }
 
     HOSPITAL {
-        ObjectId _id PK "Primary Key (Auto-generated ObjectId)"
-        ObjectId user_id FK "Foreign Key referencing users._id"
+        int id PK "SERIAL Primary Key"
+        int user_id FK "FK referencing users(id) ON DELETE CASCADE"
         string hospital_name "Official healthcare facility name"
-        string phone UK "Main facility contact line"
-        string emergency_contact "24/7 dedicated critical trauma hotline"
-        float latitude "Geographical GPS Latitude"
-        float longitude "Geographical GPS Longitude"
-        string address "Physical street and district address"
-        date created_at "Profile creation timestamp"
-        date updated_at "Profile modification timestamp"
+        string phone UK "Unique main contact phone"
+        string emergency_contact "24/7 dedicated critical hotline"
+        string address "Physical street address"
+        decimal latitude "Geographical GPS Latitude"
+        decimal longitude "Geographical GPS Longitude"
+        timestamp created_at "Facility registration timestamp"
+        timestamp updated_at "Facility modification timestamp"
     }
 
     BLOOD_INVENTORY {
-        ObjectId _id PK "Primary Key (Auto-generated ObjectId)"
-        ObjectId hospital_id FK "Foreign Key referencing hospitals._id"
+        int id PK "SERIAL Primary Key"
+        int hospital_id FK "FK referencing hospitals(id) ON DELETE CASCADE"
         string blood_group "Blood type key (A+, A-, B+, B-, AB+, AB-, O+, O-)"
         int units "Available whole blood units in storage"
-        date updated_at "Stock audit modification timestamp"
+        timestamp updated_at "Stock audit modification timestamp"
     }
 
     BLOOD_REQUEST {
-        ObjectId _id PK "Primary Key (Auto-generated ObjectId)"
-        ObjectId hospital_id FK "Foreign Key referencing hospitals._id"
+        int id PK "SERIAL Primary Key"
+        int hospital_id FK "FK referencing hospitals(id) ON DELETE CASCADE"
         string blood_group "Target blood group requested"
-        int units_required "Required blood unit volume"
+        int units_required "Remaining required units"
+        int initial_units_required "Total units originally required"
         string urgency "Triage urgency tier: normal | urgent | emergency"
         string patient_name "Recipient / Patient identifier"
         string required_by "Clinical deadline timestamp string"
         string status "Triage state: searching | fulfilled | cancelled | completed"
-        date created_at "Request broadcast timestamp"
-        date updated_at "Request lifecycle state update timestamp"
+        timestamp created_at "Request broadcast timestamp"
+        timestamp updated_at "Request state update timestamp"
+    }
+
+    DONATION_PLEDGE {
+        int id PK "SERIAL Primary Key"
+        int request_id FK "FK referencing blood_requests(id) ON DELETE CASCADE"
+        int hospital_id FK "FK referencing hospitals(id) ON DELETE CASCADE"
+        int donor_id FK "FK referencing donors(id) ON DELETE CASCADE"
+        int donor_user_id FK "FK referencing users(id) ON DELETE CASCADE"
+        string donor_name "Donor display name"
+        string donor_phone "Donor contact phone"
+        string blood_group "ABO/Rh Blood Group"
+        string status "Status: pledged | acknowledged | completed | cancelled"
+        string estimated_arrival "Estimated arrival time"
+        text notes "Optional notes"
+        timestamp created_at "Pledge creation timestamp"
+        timestamp updated_at "Pledge modification timestamp"
+    }
+
+    DONATION_HISTORY {
+        int id PK "SERIAL Primary Key"
+        int donor_id FK "FK referencing donors(id) ON DELETE CASCADE"
+        int hospital_id FK "FK referencing hospitals(id) ON DELETE CASCADE"
+        int blood_request_id FK "FK referencing blood_requests(id) ON DELETE SET NULL"
+        int pledge_id FK "FK referencing donation_pledges(id) ON DELETE SET NULL"
+        string blood_group "ABO/Rh Blood Group"
+        int units "Donated whole blood volume units"
+        timestamp donation_date "Verified donation timestamp"
+        string donor_name "Donor verified name"
+        string hospital_name "Hospital verified name"
+        string hospital_address "Hospital verified address"
+        string certificate_id UK "Cryptographically generated certificate ID"
+        string status "Status: verified | completed"
+        text remarks "Clinical remarks"
+        timestamp created_at "Certificate ledger creation timestamp"
+        timestamp updated_at "Ledger update timestamp"
     }
 
     NOTIFICATION {
-        ObjectId _id PK "Primary Key (Auto-generated ObjectId)"
-        string recipient_id "Target recipient document identifier"
+        int id PK "SERIAL Primary Key"
+        string recipient_id "Target recipient identifier"
         string recipient_role "Recipient role partition: donor | hospital | admin | all"
         string notification_type "Category: emergency_alert | system | request_update"
         string title "Notification alert header"
-        string message "Detailed message dispatch payload"
+        text message "Detailed message dispatch payload"
         string blood_group "Targeted blood group tag"
-        string request_id FK "Optional foreign reference to blood_requests._id"
+        string request_id "Optional foreign reference identifier"
         boolean is_read "Acknowledgement status flag"
-        date created_at "Notification dispatch timestamp"
-        date updated_at "Notification update timestamp"
+        timestamp created_at "Notification dispatch timestamp"
+        timestamp updated_at "Notification update timestamp"
     }
 ```
 
@@ -452,208 +514,227 @@ In relational algebra, the LifeLink database structure is formalized into 8 full
 - `DONATION_HISTORY(id, donor_id, hospital_id, blood_request_id, pledge_id, blood_group, units, donation_date, donor_name, hospital_name, hospital_address, certificate_id, status, remarks, created_at, updated_at)`
 - `NOTIFICATION(id, recipient_id, recipient_role, notification_type, title, message, blood_group, request_id, is_read, created_at, updated_at)`
 
-*Key constraints: Primary keys (PK) are unique non-null auto-incrementing integers; Foreign keys (FK) maintain referential integrity with ON DELETE CASCADE and ON DELETE SET NULL.*
+*Key constraints: Primary keys (PK) are unique non-null auto-incrementing integers (`SERIAL`); Foreign keys (FK) maintain referential integrity with `ON DELETE CASCADE` and `ON DELETE SET NULL`.*
 
 ---
 
-#### 2. Entity Specialization and Generalization (Inheritance Hierarchy)
-LifeLink implements **Disjoint Class Table Inheritance (Subtype Modeling)**:
-- **Supertype**: The `USER` relation encapsulates shared authentication attributes (`name`, `email`, `password_hash`, `role`).
-- **Subtypes**:
-  - `DONOR`: Extends `USER` with volunteer biological and spatial telemetry (`blood_group`, `phone`, `latitude`, `longitude`, `availability`).
-  - `HOSPITAL`: Extends `USER` with medical enterprise infrastructure (`hospital_name`, `emergency_contact`, `address`, `latitude`, `longitude`).
-- **Constraint Enforcement**: The `role` discriminator column strictly guarantees mutually exclusive subtype relationships:
-  - Every User with `role = 'donor'` maps to exactly one record in `DONOR` where `DONOR.user_id = USER.id`.
-  - Every User with `role = 'hospital'` maps to exactly one record in `HOSPITAL` where `HOSPITAL.user_id = USER.id`.
+#### 2. Functional Dependencies & Normalization Proofs (1NF through BCNF)
+
+LifeLink is designed under strict relational database normal forms to eliminate data redundancy, insertion anomalies, update anomalies, and deletion anomalies.
+
+##### Formal Functional Dependencies ($F$)
+- **USER**: `{id} → {name, email, password_hash, role, created_at, updated_at}`, `{email} → {id, name, password_hash, role, created_at, updated_at}`
+- **DONOR**: `{id} → {user_id, blood_group, phone, address, latitude, longitude, availability, last_donation_date}`, `{user_id} → {id, blood_group, phone, address, latitude, longitude, availability, last_donation_date}`
+- **HOSPITAL**: `{id} → {user_id, hospital_name, phone, emergency_contact, address, latitude, longitude}`, `{user_id} → {id, ...}`, `{phone} → {id, ...}`
+- **BLOOD_INVENTORY**: `{id} → {hospital_id, blood_group, units, updated_at}`, `{hospital_id, blood_group} → {id, units, updated_at}`
+- **BLOOD_REQUEST**: `{id} → {hospital_id, blood_group, units_required, initial_units_required, urgency, patient_name, required_by, status, created_at, updated_at}`
+- **DONATION_PLEDGE**: `{id} → {request_id, hospital_id, donor_id, donor_user_id, donor_name, donor_phone, blood_group, status, estimated_arrival, notes, created_at, updated_at}`
+- **DONATION_HISTORY**: `{id} → {donor_id, hospital_id, blood_request_id, pledge_id, blood_group, units, donation_date, donor_name, hospital_name, hospital_address, certificate_id, status, remarks}`, `{certificate_id} → {id, ...}`
+- **NOTIFICATION**: `{id} → {recipient_id, recipient_role, notification_type, title, message, blood_group, request_id, is_read, created_at, updated_at}`
+
+##### Normalization Stages
+1. **First Normal Form (1NF)**:
+   - Every column contains atomic (indivisible) scalar values.
+   - Repeating groups and array attributes are eliminated (e.g. inventory blood types are represented as discrete tuples in `blood_inventory`, not as JSON lists or delimited strings).
+   - Each table possesses an explicit primary key (`id SERIAL PRIMARY KEY`).
+
+2. **Second Normal Form (2NF)**:
+   - The relations are in 1NF.
+   - No partial dependencies exist: every non-prime attribute is fully functionally dependent on the entire candidate key.
+   - In `blood_inventory`, the natural candidate key is `{hospital_id, blood_group}`. All attributes (`units`, `updated_at`) depend on the complete combination of `{hospital_id, blood_group}` and surrogate `id`.
+
+3. **Third Normal Form (3NF)**:
+   - The relations are in 2NF.
+   - No transitive dependencies exist ($X \to Y$ and $Y \to Z$ where $X$ is candidate key and $Y$ is non-prime).
+   - Hospital details (`hospital_name`, `address`) are stored strictly in `HOSPITAL`. Other tables (`blood_requests`, `donation_pledges`) reference `hospital_id` rather than duplicating hospital metadata.
+
+4. **Boyce-Codd Normal Form (BCNF)**:
+   - A relation is in BCNF if for every non-trivial functional dependency $X \to Y$, $X$ is a superkey.
+   - In all 8 tables, every left-hand side determinant of a functional dependency is a candidate key (e.g., `id`, `email`, `{hospital_id, blood_group}`, `certificate_id`). Hence, the LifeLink database achieves complete **BCNF compliance**.
 
 ---
 
 #### 3. Database Integrity Constraints Matrix
 
-| Constraint Category | DBMS Principle | MySQL 8.0 InnoDB Implementation |
+| Constraint Category | DBMS Principle | PostgreSQL Implementation |
 | :--- | :--- | :--- |
-| **Entity Integrity** | Every relation must possess an immutable, non-null Primary Key. | `id INT AUTO_INCREMENT PRIMARY KEY` |
+| **Entity Integrity** | Every relation must possess an immutable, non-null Primary Key. | `id SERIAL PRIMARY KEY` |
 | **Referential Integrity** | Foreign Keys must match a valid PK in the referenced relation or be null. | `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE` |
-| **Domain Integrity** | Attributes must strictly adhere to enumerated sets and ranges. | `blood_group ENUM('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') NOT NULL` |
-| **User-Defined Integrity** | Compound business rules preventing inventory state duplication. | `CONSTRAINT uq_hospital_blood_group UNIQUE (hospital_id, blood_group)` |
-| **Check Constraints** | Non-negative numeric enforcement at the database storage engine. | `CONSTRAINT chk_inventory_units_positive CHECK (units >= 0)` |
+| **Domain Integrity** | Attributes must strictly adhere to valid enumerated sets and ranges. | `blood_group VARCHAR(5) CHECK (blood_group IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'))` |
+| **User-Defined Integrity** | Compound uniqueness preventing duplicate inventory slots per hospital. | `CONSTRAINT uq_hospital_blood_group UNIQUE (hospital_id, blood_group)` |
+| **Check Constraints** | Non-negative numeric bounds enforced at the storage engine level. | `CHECK (units >= 0)`, `CHECK (units_required >= 0)` |
 
 ---
 
-#### 4. Normalization Formal Proofs (1NF through BCNF)
-
-1. **First Normal Form (1NF)**: All attributes contain strictly atomic, scalar values. No repeating groups or nested arrays; the 8 blood types are discrete rows in `blood_inventory`.
-2. **Second Normal Form (2NF)**: All non-key attributes are fully functionally dependent on the entire Primary Key (`PK -> Attributes`). There are no partial dependencies on compound keys.
-3. **Third Normal Form (3NF)**: No transitive functional dependencies exist (`X -> Y` and `Y -> Z` where `X` is `PK`). For example, hospital contact and address are stored exclusively in `HOSPITAL`, never duplicated in `BLOOD_REQUEST` or `DONATION_PLEDGE`.
-4. **Boyce-Codd Normal Form (BCNF)**: For every non-trivial functional dependency `X -> Y`, `X` is a candidate key / superkey across all 8 relations.
-
----
-
-#### 5. MySQL Automated Triggers
-
-LifeLink enforces business logic and real-time state synchronization at the database engine level via 3 InnoDB Triggers:
-
-1. **`trg_after_hospital_insert`**:
-   - Fires automatically upon creating a new hospital record.
-   - Automatically initializes all 8 major blood group slots (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`) in `blood_inventory` with `units = 0`.
-
-2. **`trg_after_donation_history_insert`**:
-   - Fires automatically upon recording a verified blood donation in `donation_history`.
-   - Atomically increments hospital stock in `blood_inventory` via `ON DUPLICATE KEY UPDATE units = units + NEW.units`.
-   - Automatically updates donor's `last_donation_date = DATE(NEW.donation_date)`.
-   - If connected to a `blood_request_id`, automatically decrements `units_required` and transitions status to `'fulfilled'` if remaining units reach 0.
-
-3. **`trg_before_blood_request_update`**:
-   - Enforces a Terminal State Lock constraint.
-   - Raises `SIGNAL SQLSTATE '45000'` if any operation attempts to revert an already `'fulfilled'` or `'completed'` blood request back to `'searching'`.
+#### 4. Disjoint Class Table Inheritance (Subtype Modeling)
+LifeLink implements **Disjoint Class Table Inheritance**:
+- **Supertype**: The `USER` relation encapsulates core credentials (`name`, `email`, `password_hash`, `role`).
+- **Subtypes**:
+  - `DONOR`: Specializes `USER` with medical, biological, and spatial attributes (`blood_group`, `phone`, `latitude`, `longitude`, `availability`).
+  - `HOSPITAL`: Specializes `USER` with institutional healthcare facilities (`hospital_name`, `emergency_contact`, `address`, `latitude`, `longitude`).
+- **Discriminator Enforcement**: The `role` column (`CHECK (role IN ('donor', 'hospital', 'admin'))`) acts as a mutually exclusive discriminator enforced via 1:1 unique foreign key constraints (`user_id INT NOT NULL UNIQUE`).
 
 ---
 
-#### 6. ACID Transaction Management
+#### 5. ACID Transaction Management & Concurrency Control
 
-- **Atomicity (A)**: Multi-step critical operations (`completePledgeAndVerifyDonation`, `createDirectDonation`, `createAdminUser`, cascade account removal) are wrapped in explicit database transactions (`withTransaction`) using `START TRANSACTION`, `COMMIT`, and `ROLLBACK`. If any step fails, all intermediate mutations are cleanly discarded.
-- **Consistency (C)**: Foreign Key referential constraints, `CHECK (units >= 0)`, and trigger validations guarantee invalid states never reach the storage engine.
-- **Isolation (I)**: InnoDB's default **REPEATABLE READ** with Multiversion Concurrency Control (MVCC) eliminates dirty reads and non-repeatable reads during high-throughput emergency surges.
-- **Durability (D)**: InnoDB Write-Ahead Logging (WAL) via doublewrite buffer and redo log guarantees all committed transactions survive unexpected server restarts.
+- **Atomicity (A)**: Complex clinical workflows (e.g., verifying a donation pledge, incrementing inventory, and fulfilling blood requests) execute inside atomic database transactions (`BEGIN` ... `COMMIT` / `ROLLBACK`). If any step encounters an error, all changes rollback completely.
+- **Consistency (C)**: Foreign Key cascades, check constraints, unique composite keys, and PL/pgSQL triggers guarantee that invalid states cannot be committed.
+- **Isolation (I)**: PostgreSQL leverages **Multi-Version Concurrency Control (MVCC)** with `READ COMMITTED` and `SERIALIZABLE` options. High-concurrency operations utilize row-level pessimistic locking (`SELECT ... FOR UPDATE`) to prevent inventory overselling race conditions.
+- **Durability (D)**: PostgreSQL Write-Ahead Logging (WAL) ensures all committed data survives unexpected power failures or server crashes.
 
----
-
-### MySQL Code Implementation and DBMS Mapping
-
-Below are the core schema models illustrating the direct application of DBMS concepts in the Node.js + MySQL codebase:
-
-#### 1. User Entity Data Access ([backend/src/models/User.js](file:///e:/DBMS/backend/src/models/User.js))
 ```javascript
-export class User {
-  static async findById(id, connection = pool) {
-    const [rows] = await connection.query(
-      'SELECT id, name, email, password_hash, role, created_at, updated_at FROM users WHERE id = ?',
-      [id]
-    );
-    return rows[0] || null;
-  }
-
-  static async findByEmail(email, connection = pool) {
-    const [rows] = await connection.query(
-      'SELECT id, name, email, password_hash, role, created_at, updated_at FROM users WHERE LOWER(email) = LOWER(?)',
-      [email.trim()]
-    );
-    return rows[0] || null;
-  }
-
-  static async create({ name, email, password_hash, role = 'donor' }, connection = pool) {
-    const [result] = await connection.query(
-      'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      [name.trim(), email.toLowerCase().trim(), password_hash, role.toLowerCase().trim()]
-    );
-    return { id: result.insertId, name, email, role };
-  }
-}
-```
-
-#### 2. Blood Inventory Atomic Upsert with Compound Unique Key ([backend/src/models/BloodInventory.js](file:///e:/DBMS/backend/src/models/BloodInventory.js))
-```javascript
-export class BloodInventory {
-  static async upsert({ hospital_id, blood_group, units }, connection = pool) {
-    const [result] = await connection.query(
-      `INSERT INTO blood_inventory (hospital_id, blood_group, units)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE units = VALUES(units), updated_at = CURRENT_TIMESTAMP`,
-      [hospital_id, blood_group.toUpperCase(), Math.max(0, Number(units) || 0)]
-    );
-    return await this.findByHospitalAndGroup(hospital_id, blood_group, connection);
-  }
-}
-```
-
-#### 3. ACID Transaction Management ([backend/src/config/db.js](file:///e:/DBMS/backend/src/config/db.js))
-```javascript
+// Example: Explicit ACID Transaction with PostgreSQL
 export const withTransaction = async (workFn) => {
-  const connection = await pool.getConnection();
+  const client = await pool.connect();
+  const conn = {
+    query: async (sql, params = []) => {
+      const formatted = formatSql(sql);
+      const res = await client.query(formatted, params);
+      return [res.rows, res];
+    },
+  };
+
   try {
-    await connection.beginTransaction();
-    const result = await workFn(connection);
-    await connection.commit();
+    await client.query('BEGIN');
+    const result = await workFn(conn);
+    await client.query('COMMIT');
     return result;
   } catch (error) {
-    await connection.rollback();
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
     throw error;
   } finally {
-    connection.release();
+    client.release();
   }
 };
 ```
 
-#### 4. Geospatial Proximity Matching & Haversine Calculation
-LifeLink computes spatial proximity between donors and emergency trauma centers using the spherical Haversine trigonometric formula:
+---
 
-```text
-d = 2R · atan2( √a, √(1−a) )
-where a = sin²(Δϕ / 2) + cos(ϕ₁) · cos(ϕ₂) · sin²(Δλ / 2)
+#### 6. PL/pgSQL Stored Functions, Procedures & Triggers
+
+##### Stored Function: Geospatial Proximity Search
+Calculates spherical distance using the Haversine trigonometric formula directly in PostgreSQL:
+
+```sql
+CREATE OR REPLACE FUNCTION fn_calculate_haversine_distance(
+    lat1 NUMERIC, lon1 NUMERIC, lat2 NUMERIC, lon2 NUMERIC
+) RETURNS NUMERIC AS $$
+DECLARE
+    r NUMERIC := 6371; -- Earth radius in km
+    dlat NUMERIC := radians(lat2 - lat1);
+    dlon NUMERIC := radians(lon2 - lon1);
+    a NUMERIC;
+    c NUMERIC;
+BEGIN
+    IF (lat1 = lat2 AND lon1 = lon2) THEN
+        RETURN 0.0;
+    END IF;
+
+    a := sin(dlat / 2)^2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2)^2;
+    c := 2 * atan2(sqrt(a), sqrt(1 - a));
+    RETURN round(r * c, 2);
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-- `ϕ₁, ϕ₂`: Latitude coordinates of donor and hospital in radians.
-- `λ₁, λ₂`: Longitude coordinates in radians.
-- `R`: Earth mean radius (6,371 km).
+##### Stored Procedure: Inter-Hospital Blood Inventory Transfer
+Executes an ACID-compliant inventory transfer between two healthcare facilities:
 
-```javascript
-export function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Number((R * c).toFixed(1));
-}
+```sql
+CREATE OR REPLACE PROCEDURE sp_transfer_blood_units(
+    p_source_hospital_id INT,
+    p_target_hospital_id INT,
+    p_blood_group VARCHAR(5),
+    p_units INT
+) AS $$
+DECLARE
+    v_available_units INT;
+BEGIN
+    IF p_units <= 0 THEN
+        RAISE EXCEPTION 'Transfer volume must be greater than zero';
+    END IF;
+
+    -- Row-level lock to prevent concurrent inventory race condition
+    SELECT units INTO v_available_units
+    FROM blood_inventory
+    WHERE hospital_id = p_source_hospital_id AND blood_group = p_blood_group
+    FOR UPDATE;
+
+    IF v_available_units IS NULL OR v_available_units < p_units THEN
+        RAISE EXCEPTION 'Insufficient stock in source hospital: available %, requested %', v_available_units, p_units;
+    END IF;
+
+    -- Deduct from source
+    UPDATE blood_inventory
+    SET units = units - p_units, updated_at = CURRENT_TIMESTAMP
+    WHERE hospital_id = p_source_hospital_id AND blood_group = p_blood_group;
+
+    -- Add to target (upsert)
+    INSERT INTO blood_inventory (hospital_id, blood_group, units, updated_at)
+    VALUES (p_target_hospital_id, p_blood_group, p_units, CURRENT_TIMESTAMP)
+    ON CONFLICT (hospital_id, blood_group)
+    DO UPDATE SET units = blood_inventory.units + EXCLUDED.units, updated_at = CURRENT_TIMESTAMP;
+END;
+$$ LANGUAGE plpgsql;
 ```
+
+##### Automated Database Triggers
+LifeLink executes business logic at the PostgreSQL storage engine level via 3 automated triggers:
+
+1. **`trg_after_hospital_insert`**:
+   - Fires automatically upon inserting a new hospital facility.
+   - Automatically initializes all 8 inventory slots (`A+` to `O-`) with 0 units on `ON CONFLICT DO NOTHING`.
+
+2. **`trg_after_donation_history_insert`**:
+   - Fires automatically upon inserting a verified donation record.
+   - Increments hospital inventory stock via `ON CONFLICT DO UPDATE`.
+   - Updates donor's `last_donation_date`.
+   - Decrements `units_required` in the linked `blood_requests` and auto-transitions request status to `'fulfilled'` when remaining units reach 0.
+
+3. **`trg_before_blood_request_update`**:
+   - Enforces a Terminal State Lock constraint.
+   - Raises an exception (`RAISE EXCEPTION`) if any query attempts to revert a fulfilled or completed request back to searching.
 
 ---
 
 ### Comprehensive Database Query Catalog (DBMS Operations & Mathematical Formalization)
 
-Below is the exhaustive mathematical and practical breakdown of every query executed within the LifeLink platform, contrasting formal Relational Algebra, ANSI SQL:1999, MongoDB Mongoose ODM queries, and internal storage engine execution plans:
+Below is the exhaustive mathematical breakdown of queries executed within LifeLink, contrasting formal Relational Algebra, PostgreSQL ANSI SQL, and storage engine execution plans:
 
 #### Query 1: User Identity Authentication & Single-Record Selection
 - **Relational Algebra**:
-  `σ[email = target_email](USER)`
-- **Standard ANSI SQL**:
+  $$\sigma_{email = \text{'donor@lifelink.org'}}(USER)$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
-  SELECT user_id, name, email, password_hash, role
+  SELECT id, name, email, password_hash, role
   FROM users
-  WHERE email = 'donor@lifelink.org'
+  WHERE email = LOWER($1)
   LIMIT 1;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const user = await User.findOne({ email: email.toLowerCase() });
-  ```
-- **Storage Engine Execution Plan**: `IXSCAN` on `{ email: 1 }` Unique B-Tree Index. Time Complexity: `O(log N)`. Zero collection scans (`COLLSCAN: 0`).
+- **Execution Plan**: `Index Scan using idx_users_email on users`. Time Complexity: $\mathcal{O}(\log N)$. Zero sequential scans.
 
 ---
 
-#### Query 2: Active Donor Discovery for Emergency Broadcast
+#### Query 2: Active Compatible Donor Discovery for Emergency Broadcast
 - **Relational Algebra**:
-  `π[donor_id, phone, latitude, longitude, availability]( σ[blood_group = 'O-' ∧ availability = true](DONOR) )`
-- **Standard ANSI SQL**:
+  $$\pi_{id, phone, latitude, longitude, availability}(\sigma_{blood\_group = \text{'O-'} \wedge availability = \text{TRUE}}(DONOR))$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT id, phone, latitude, longitude, availability
   FROM donors
-  WHERE blood_group = 'O-' AND availability = TRUE;
+  WHERE blood_group = $1 AND availability = TRUE;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const donors = await Donor.find({ blood_group: 'O-', availability: true });
-  ```
-- **Storage Engine Execution Plan**: `IXSCAN` utilizing the Compound Index `{ blood_group: 1, availability: 1 }`. Filtering occurs at index-level prior to document fetching.
+- **Execution Plan**: `Bitmap Index Scan on idx_donors_blood_avail`. Composite index filters both equality predicates before fetching heap pages.
 
 ---
 
-#### Query 3: Emergency Transfusion Request Join with Healthcare Facility Contact
+#### Query 3: Emergency Request Join with Healthcare Facility Infrastructure
 - **Relational Algebra**:
-  `π[r.id, r.blood_group, r.units_required, r.urgency, h.hospital_name, h.phone, h.address, h.latitude, h.longitude]( σ[r.blood_group = 'O-' ∧ r.status = 'searching'](BLOOD_REQUEST r) ⨝[r.hospital_id = h._id] HOSPITAL h )`
-- **Standard ANSI SQL**:
+  $$\pi_{r.id, r.blood\_group, r.units\_required, r.urgency, h.hospital\_name, h.phone, h.address, h.latitude, h.longitude}(\sigma_{r.blood\_group = \text{'O-'} \wedge r.status = \text{'searching'}}(BLOOD\_REQUEST \; r) \bowtie_{r.hospital\_id = h.id} HOSPITAL \; h)$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT 
     r.id AS request_id,
@@ -669,143 +750,91 @@ Below is the exhaustive mathematical and practical breakdown of every query exec
     h.longitude AS hospital_longitude
   FROM blood_requests r
   INNER JOIN hospitals h ON r.hospital_id = h.id
-  WHERE r.blood_group = 'O-' AND r.status = 'searching'
+  WHERE r.blood_group = $1 AND r.status = 'searching'
   ORDER BY r.created_at DESC;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const requests = await BloodRequest.find({ blood_group: 'O-', status: 'searching' })
-    .populate('hospital_id')
-    .sort({ created_at: -1 });
-  ```
-- **Storage Engine Execution Plan**: `IXSCAN` on `{ blood_group: 1, status: 1 }` followed by indexed primary key lookups against `hospitals._id`.
+- **Execution Plan**: `Nested Loop / Hash Join` using `idx_requests_status_group` on `blood_requests` and PK Index on `hospitals.id`.
 
 ---
 
-#### Query 4: 8-Group Refrigeration Stock Imputation & Fetch
+#### Query 4: 8-Group Refrigeration Stock Fetch
 - **Relational Algebra**:
-  `π[blood_group, units]( σ[hospital_id = target_id](BLOOD_INVENTORY) )`
-- **Standard ANSI SQL**:
+  $$\pi_{blood\_group, units}(\sigma_{hospital\_id = h}(BLOOD\_INVENTORY))$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT blood_group, units
   FROM blood_inventory
-  WHERE hospital_id = '65d1f89e2c4a1b0012e4f5a1';
+  WHERE hospital_id = $1;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const stock = await BloodInventory.find({ hospital_id: targetId });
-  ```
-- **Storage Engine Execution Plan**: `IXSCAN` on compound unique index `{ hospital_id: 1, blood_group: 1 }` prefix `{ hospital_id: 1 }`. Guarantees retrieval of 8 records in `O(log N)` time.
+- **Execution Plan**: `Index Scan using idx_inventory_hosp_blood on blood_inventory`. Fetches all 8 blood slots in $\mathcal{O}(\log N)$ time.
 
 ---
 
-#### Query 5: Atomic Inventory Modification (Compare-and-Swap / Upsert)
+#### Query 5: Atomic Inventory Upsert (ON CONFLICT DO UPDATE)
 - **Relational Algebra**:
-  `UPSERT(BLOOD_INVENTORY, hospital_id = h ∧ blood_group = g, units ← u)`
-- **Standard ANSI SQL**:
+  $$\text{UPSERT}(BLOOD\_INVENTORY, hospital\_id = h \wedge blood\_group = g, units \leftarrow u)$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   INSERT INTO blood_inventory (hospital_id, blood_group, units, updated_at)
-  VALUES ('65d1f89e2c4a1b0012e4f5a1', 'O+', 12, NOW())
+  VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
   ON CONFLICT (hospital_id, blood_group)
-  DO UPDATE SET units = EXCLUDED.units, updated_at = NOW();
+  DO UPDATE SET units = EXCLUDED.units, updated_at = CURRENT_TIMESTAMP
+  RETURNING *;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const item = await BloodInventory.findOneAndUpdate(
-    { hospital_id, blood_group },
-    { $set: { units } },
-    { new: true, upsert: true, runValidators: true }
-  );
-  ```
-- **Storage Engine Execution Plan**: Unique Index seek on `{ hospital_id: 1, blood_group: 1 }`. If matched, applies single-document in-place mutation. If unindexed, generates a new document atomically without table locks.
+- **Execution Plan**: Unique Index seek on `uq_hospital_blood_group`. Applies atomic in-place mutation without application-level race conditions.
 
 ---
 
 #### Query 6: Aggregate Platform Blood Reserves Rollup
 - **Relational Algebra**:
-  `γ[blood_group, SUM(units) → total_units](BLOOD_INVENTORY)`
-- **Standard ANSI SQL**:
+  $$\gamma_{blood\_group, \text{SUM}(units) \to total\_units}(BLOOD\_INVENTORY)$$
+- **PostgreSQL SQL**:
   ```sql
   SELECT blood_group, COALESCE(SUM(units), 0) AS total_units
   FROM blood_inventory
   GROUP BY blood_group;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const stats = await BloodInventory.aggregate([
-    {
-      $group: {
-        _id: '$blood_group',
-        total_units: { $sum: '$units' },
-      },
-    },
-  ]);
-  ```
-- **Storage Engine Execution Plan**: Document pipeline engine executing an in-memory hash aggregation across the 8 distinct blood group buckets.
+- **Execution Plan**: `HashAggregate` across the 8 distinct blood group buckets.
 
 ---
 
-#### Query 7: Topological Referential Cascade Deletion
+#### Query 7: Referential Cascade Account Deletion
 - **Relational Algebra**:
-  `DELETE FROM USER WHERE user_id = u ⟹ CASCADE DELETE (DONOR, HOSPITAL → (BLOOD_INVENTORY, BLOOD_REQUEST))`
-- **Standard ANSI SQL**:
+  $$\text{DELETE FROM } USER \text{ WHERE } id = u \implies \text{CASCADE DELETE}(DONOR, HOSPITAL \to (BLOOD\_INVENTORY, BLOOD\_REQUEST))$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
-  DELETE FROM users WHERE id = '65d1f89e2c4a1b0012e4f5a1';
-  -- Cascade foreign keys automatically purge dependent rows:
-  -- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  DELETE FROM users WHERE id = $1;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  await Donor.deleteMany({ user_id });
-  const hospital = await Hospital.findOne({ user_id });
-  if (hospital) {
-    await BloodInventory.deleteMany({ hospital_id: hospital._id });
-    await BloodRequest.deleteMany({ hospital_id: hospital._id });
-    await Hospital.findByIdAndDelete(hospital._id);
-  }
-  await User.findByIdAndDelete(user_id);
-  ```
+- **Execution Plan**: Foreign key triggers automatically clean up associated records in `donors`, `hospitals`, `blood_inventory`, `blood_requests`, `donation_pledges`, `donation_history`, and `notifications` in topological dependency order.
 
 ---
 
 #### Query 8: Triage Request Status Transition
 - **Relational Algebra**:
-  `UPDATE BLOOD_REQUEST SET status = 'fulfilled', updated_at = NOW() WHERE request_id = r`
-- **Standard ANSI SQL**:
+  $$\text{UPDATE } BLOOD\_REQUEST \text{ SET } status = 'fulfilled', updated\_at = \text{NOW}() \text{ WHERE } id = r$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   UPDATE blood_requests
-  SET status = 'fulfilled', updated_at = NOW()
-  WHERE id = '65d1f89e2c4a1b0012e4f5a9';
+  SET status = 'fulfilled', updated_at = CURRENT_TIMESTAMP
+  WHERE id = $1
+  RETURNING *;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const req = await BloodRequest.findByIdAndUpdate(
-    request_id,
-    { status: 'fulfilled' },
-    { new: true }
-  );
-  ```
+- **Execution Plan**: `Index Scan on blood_requests_pkey`. `trg_before_blood_request_update` validates valid state transition.
 
 ---
 
 #### Query 9: User Directory Multi-Attribute Pagination & Search
 - **Relational Algebra**:
-  `π[user_id, name, email, role, created_at]( σ[role = 'donor'](USER) )`
-- **Standard ANSI SQL**:
+  $$\pi_{id, name, email, role, created\_at}(\sigma_{role = \text{'donor'}}(USER))$$
+- **PostgreSQL Parameterized SQL**:
   ```sql
   SELECT id, name, email, role, created_at
   FROM users
-  WHERE role = 'donor'
+  WHERE role = $1
   ORDER BY created_at DESC
-  LIMIT 50 OFFSET 0;
+  LIMIT $2 OFFSET $3;
   ```
-- **MongoDB Mongoose Query**:
-  ```javascript
-  const users = await User.find({ role: 'donor' })
-    .select('-password_hash')
-    .sort({ created_at: -1 })
-    .limit(50);
-  ```
+- **Execution Plan**: `Index Scan using idx_users_role on users`. Cost-effective pagination without full table scan.
 
 ---
 
@@ -818,8 +847,8 @@ graph TD
     B -->|Donor| C["Fill Donor Registration Form"]
     B -->|Hospital| D["Fill Hospital Registration Form"]
     
-    C --> E["1. POST /users creates User Account<br/>2. POST /users/:id/donor creates Donor Profile"]
-    D --> F["1. POST /users creates User Account<br/>2. POST /users/:id/hospital creates Hospital Profile"]
+    C --> E["1. INSERT INTO users<br/>2. INSERT INTO donors"]
+    D --> F["1. INSERT INTO users<br/>2. INSERT INTO hospitals"]
     
     E --> G["Redirect to Donor Dashboard"]
     F --> H["Redirect to Hospital Blood Bank Management"]
@@ -828,14 +857,14 @@ graph TD
 ### 2. Hospital Blood Bank Stock Management
 1. **Matrix Initialization**: Hospitals query `GET /hospitals/:id/blood-bank`. The backend guarantees an 8-slot response representing `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-` (with `0` units if not yet explicitly stocked).
 2. **Stock Increment/Decrement**: Hospital managers edit units for specific blood types via `PUT /hospitals/:id/blood-bank`.
-3. **Upsert Logic**: MongoDB automatically updates the record or creates a new entry using the compound unique index `{ hospital_id: 1, blood_group: 1 }`.
+3. **Upsert Logic**: PostgreSQL updates the record or creates a new entry using `ON CONFLICT (hospital_id, blood_group) DO UPDATE SET units = EXCLUDED.units`.
 
 ### 3. Emergency Request Triage and Dispatch
 1. **Urgency Classification**:
    - `normal`: Standard elective transfusion or scheduled surgery preparation.
    - `urgent`: Timed requirement needed within 12-24 hours.
    - `emergency`: Immediate trauma or ICU life-support requirement.
-2. **Broadcast Trigger**: Sending a `POST /blood-requests` immediately marks the request as `searching` and makes it discoverable by matching donors.
+2. **Broadcast Trigger**: Sending a `POST /blood-requests` creates a record in `blood_requests` with status `searching` and notifies compatible nearby donors.
 
 ### 4. Donor Matching and Response Workflow
 1. **Radar Discovery**: When a donor logs into their dashboard, the system calls `GET /blood-requests/donor/:donor_id`.
@@ -1267,17 +1296,17 @@ DBMS/
 ├── package.json                  # Root orchestration and convenience scripts
 ├── README.md                     # Architecture, ER diagrams, and project documentation
 │
-├── backend/                      # Node.js + MySQL 8.0 RESTful API
-│   ├── package.json              # Express, mysql2, Helmet, Cors
+├── backend/                      # Node.js + PostgreSQL / Supabase RESTful API
+│   ├── package.json              # Express, pg (node-postgres), Helmet, Cors
 │   ├── server.js                 # Server entry point & graceful shutdown
+│   ├── Dockerfile                # Production cloud container manifest
+│   ├── vercel.json               # Serverless cloud deployment configuration
 │   ├── .env.example              # Environment variables template
 │   └── src/
 │       ├── app.js                # Express app initialization & middleware stack
 │       ├── config/
-│       │   ├── db.js             # MySQL connection pool, transaction helper & schema ensure
+│       │   ├── db.js             # PostgreSQL pool, transaction manager & client wrapper
 │       │   └── env.js            # Environment validation & configuration
-│       ├── db/
-│       │   └── schema.sql        # Normalized DDL tables, constraints, indexes & triggers
 │       ├── models/
 │       │   ├── User.js           # User data access & queries
 │       │   ├── Donor.js          # Donor profiles & spatial queries
