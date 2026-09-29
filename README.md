@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Node.js-v20+-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/Express.js-v4.21-000000?style=for-the-badge&logo=express&logoColor=white" alt="Express.js" />
-  <img src="https://img.shields.io/badge/MongoDB-Mongoose_v8-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase PostgreSQL" />
   <img src="https://img.shields.io/badge/React-v18.3-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-v5.6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/TailwindCSS-v3.4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
@@ -103,13 +103,15 @@ graph TB
         Ctrl_Analytics["Analytics Controller (Platform Metrics)"]
     end
 
-    subgraph Data_Layer["Data Tier (MongoDB & Mongoose ODM)"]
-        Col_Users[("users Collection - Unique Email Index")]
-        Col_Donors[("donors Collection - Compound Index")]
-        Col_Hospitals[("hospitals Collection - Unique Phone Index")]
-        Col_Inventory[("blood_inventory Collection - Compound Unique Index")]
-        Col_Requests[("blood_requests Collection - Index [hospital_id, created_at]")]
-        Col_Notifications[("notifications Collection - Index [recipient_id, created_at]")]
+    subgraph Data_Layer["Data Tier (PostgreSQL / Supabase & Relational Engine)"]
+        Col_Users[("users Table - PK & Unique Email Index")]
+        Col_Donors[("donors Table - Compound Index & FK Cascade")]
+        Col_Hospitals[("hospitals Table - Unique Phone Index & Auto-Inventory Trigger")]
+        Col_Inventory[("blood_inventory Table - Compound Unique Key")]
+        Col_Requests[("blood_requests Table - Terminal State Lock Trigger")]
+        Col_Pledges[("donation_pledges Table - ACID Transactions")]
+        Col_History[("donation_history Table - Automated Inventory & Request Trigger")]
+        Col_Notifications[("notifications Table - Real-Time Alert Queue")]
     end
 
     UI_Landing & UI_Auth & UI_Donor & UI_Hospital & UI_Admin & UI_Mobile -->|HTTP/REST| MW_Helmet
@@ -439,160 +441,145 @@ erDiagram
 ### DBMS Concepts & Theoretical Analysis
 
 #### 1. Relational Schema Mapping & Mathematical Notation
-In relational algebra, the LifeLink database structure is formalized into 6 normalized relations:
+In relational algebra, the LifeLink database structure is formalized into 8 fully normalized relations (BCNF / 3NF):
 
-- `USER(user_id, name, email, password_hash, role, created_at, updated_at)`
-- `DONOR(donor_id, user_id, blood_group, phone, latitude, longitude, availability, last_donation_date, created_at, updated_at)`
-- `HOSPITAL(hospital_id, user_id, hospital_name, phone, emergency_contact, latitude, longitude, address, created_at, updated_at)`
-- `BLOOD_INVENTORY(inventory_id, hospital_id, blood_group, units, updated_at)`
-- `BLOOD_REQUEST(request_id, hospital_id, blood_group, units_required, urgency, patient_name, required_by, status, created_at, updated_at)`
-- `NOTIFICATION(notification_id, recipient_id, recipient_role, notification_type, title, message, blood_group, request_id, is_read, created_at, updated_at)`
+- `USER(id, name, email, password_hash, role, created_at, updated_at)`
+- `DONOR(id, user_id, blood_group, phone, address, latitude, longitude, availability, last_donation_date, created_at, updated_at)`
+- `HOSPITAL(id, user_id, hospital_name, phone, emergency_contact, address, latitude, longitude, created_at, updated_at)`
+- `BLOOD_INVENTORY(id, hospital_id, blood_group, units, updated_at)`
+- `BLOOD_REQUEST(id, hospital_id, blood_group, units_required, initial_units_required, urgency, patient_name, required_by, status, created_at, updated_at)`
+- `DONATION_PLEDGE(id, request_id, hospital_id, donor_id, donor_user_id, donor_name, donor_phone, blood_group, status, estimated_arrival, notes, created_at, updated_at)`
+- `DONATION_HISTORY(id, donor_id, hospital_id, blood_request_id, pledge_id, blood_group, units, donation_date, donor_name, hospital_name, hospital_address, certificate_id, status, remarks, created_at, updated_at)`
+- `NOTIFICATION(id, recipient_id, recipient_role, notification_type, title, message, blood_group, request_id, is_read, created_at, updated_at)`
 
-*Key constraints: Primary keys (PK) are unique non-null identifiers; Foreign keys (FK) link dependent relations.*
+*Key constraints: Primary keys (PK) are unique non-null auto-incrementing integers; Foreign keys (FK) maintain referential integrity with ON DELETE CASCADE and ON DELETE SET NULL.*
 
 ---
 
 #### 2. Entity Specialization and Generalization (Inheritance Hierarchy)
 LifeLink implements **Disjoint Class Table Inheritance (Subtype Modeling)**:
-- **Supertype**: The `USER` entity encapsulates shared authentication attributes (`name`, `email`, `password_hash`, `role`).
+- **Supertype**: The `USER` relation encapsulates shared authentication attributes (`name`, `email`, `password_hash`, `role`).
 - **Subtypes**:
   - `DONOR`: Extends `USER` with volunteer biological and spatial telemetry (`blood_group`, `phone`, `latitude`, `longitude`, `availability`).
   - `HOSPITAL`: Extends `USER` with medical enterprise infrastructure (`hospital_name`, `emergency_contact`, `address`, `latitude`, `longitude`).
 - **Constraint Enforcement**: The `role` discriminator column strictly guarantees mutually exclusive subtype relationships:
-  - Every User with `role = 'donor'` maps to exactly one record in `DONOR` where `DONOR.user_id = USER._id`.
-  - Every User with `role = 'hospital'` maps to exactly one record in `HOSPITAL` where `HOSPITAL.user_id = USER._id`.
+  - Every User with `role = 'donor'` maps to exactly one record in `DONOR` where `DONOR.user_id = USER.id`.
+  - Every User with `role = 'hospital'` maps to exactly one record in `HOSPITAL` where `HOSPITAL.user_id = USER.id`.
 
 ---
 
 #### 3. Database Integrity Constraints Matrix
 
-| Constraint Category | DBMS Principle | Mongoose & MongoDB Implementation | SQL Equivalent |
-| :--- | :--- | :--- | :--- |
-| **Entity Integrity** | Every relation must possess a non-null, immutable Primary Key. | `_id: { type: Schema.Types.ObjectId, auto: true }` | `id INT PRIMARY KEY AUTO_INCREMENT` |
-| **Referential Integrity** | Foreign Keys must either match a valid PK in the referenced relation or be null. | `user_id: { type: Schema.Types.ObjectId, ref: 'User', required: true }` | `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE` |
-| **Domain Integrity** | Attributes must adhere strictly to defined data types, ranges, and enumerated sets. | `blood_group: { type: String, enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] }` | `CHECK (blood_group IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'))` |
-| **User-Defined Integrity** | Compound business rules preventing state duplication. | `BloodInventorySchema.index({ hospital_id: 1, blood_group: 1 }, { unique: true })` | `CONSTRAINT unique_stock UNIQUE (hospital_id, blood_group)` |
+| Constraint Category | DBMS Principle | MySQL 8.0 InnoDB Implementation |
+| :--- | :--- | :--- |
+| **Entity Integrity** | Every relation must possess an immutable, non-null Primary Key. | `id INT AUTO_INCREMENT PRIMARY KEY` |
+| **Referential Integrity** | Foreign Keys must match a valid PK in the referenced relation or be null. | `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE` |
+| **Domain Integrity** | Attributes must strictly adhere to enumerated sets and ranges. | `blood_group ENUM('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') NOT NULL` |
+| **User-Defined Integrity** | Compound business rules preventing inventory state duplication. | `CONSTRAINT uq_hospital_blood_group UNIQUE (hospital_id, blood_group)` |
+| **Check Constraints** | Non-negative numeric enforcement at the database storage engine. | `CONSTRAINT chk_inventory_units_positive CHECK (units >= 0)` |
 
 ---
 
-#### 4. Normalization and De-normalization Trade-off Analysis
+#### 4. Normalization Formal Proofs (1NF through BCNF)
 
-##### Normal Form Proofs:
-1. **First Normal Form (1NF)**: All attributes contain strictly atomic, scalar values. No multi-valued repeating groups (e.g. the 8 blood types are normalized into discrete rows in `blood_inventory` rather than an unindexed array).
-2. **Second Normal Form (2NF)**: All non-key attributes are fully functionally dependent on the complete primary key (`PK -> Attributes`). No partial dependencies exist.
-3. **Third Normal Form (3NF)**: No transitive functional dependencies exist (`X -> Y` and `Y -> Z` where `X` is `PK`). For example, hospital address and phone are stored solely in `HOSPITAL`, not duplicated in `BLOOD_REQUEST`.
-4. **Boyce-Codd Normal Form (BCNF)**: For every functional dependency `X -> Y`, `X` is a superkey.
-
-##### Controlled De-normalization for Ultra-Low Latency Triage:
-In mission-critical emergency scenarios where seconds save lives, join operations across distributed shards introduce I/O latency. To achieve sub-millisecond query execution:
-- The donor matching endpoint (`GET /blood-requests/donor/:id`) utilizes index-covered `$lookup` joins in MongoDB, consolidating hospital contact and coordinates directly into the response payload in a single database round-trip (O(1) lookup time).
+1. **First Normal Form (1NF)**: All attributes contain strictly atomic, scalar values. No repeating groups or nested arrays; the 8 blood types are discrete rows in `blood_inventory`.
+2. **Second Normal Form (2NF)**: All non-key attributes are fully functionally dependent on the entire Primary Key (`PK -> Attributes`). There are no partial dependencies on compound keys.
+3. **Third Normal Form (3NF)**: No transitive functional dependencies exist (`X -> Y` and `Y -> Z` where `X` is `PK`). For example, hospital contact and address are stored exclusively in `HOSPITAL`, never duplicated in `BLOOD_REQUEST` or `DONATION_PLEDGE`.
+4. **Boyce-Codd Normal Form (BCNF)**: For every non-trivial functional dependency `X -> Y`, `X` is a candidate key / superkey across all 8 relations.
 
 ---
 
-#### 5. ACID Transaction Management and Single-Document Atomicity
+#### 5. MySQL Automated Triggers
 
-- **Atomicity (A)**: MongoDB guarantees single-document atomicity for all write and update operations. Stock modifications use atomic operators (`$set`, `$inc`) ensuring partial inventory updates never occur.
-- **Consistency (C)**: Mongoose pre-save validation hooks and unique index constraints prevent invalid states from reaching the database storage engine (WiredTiger).
-- **Isolation (I)**: Read-uncommitted and read-committed isolation levels prevent dirty reads during concurrent triage updates.
-- **Durability (D)**: Write concerns (`w: 1` with write-ahead journal logging) guarantee committed transactions survive unexpected server restarts.
+LifeLink enforces business logic and real-time state synchronization at the database engine level via 3 InnoDB Triggers:
+
+1. **`trg_after_hospital_insert`**:
+   - Fires automatically upon creating a new hospital record.
+   - Automatically initializes all 8 major blood group slots (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`) in `blood_inventory` with `units = 0`.
+
+2. **`trg_after_donation_history_insert`**:
+   - Fires automatically upon recording a verified blood donation in `donation_history`.
+   - Atomically increments hospital stock in `blood_inventory` via `ON DUPLICATE KEY UPDATE units = units + NEW.units`.
+   - Automatically updates donor's `last_donation_date = DATE(NEW.donation_date)`.
+   - If connected to a `blood_request_id`, automatically decrements `units_required` and transitions status to `'fulfilled'` if remaining units reach 0.
+
+3. **`trg_before_blood_request_update`**:
+   - Enforces a Terminal State Lock constraint.
+   - Raises `SIGNAL SQLSTATE '45000'` if any operation attempts to revert an already `'fulfilled'` or `'completed'` blood request back to `'searching'`.
 
 ---
 
-### Mongoose Code Implementation and DBMS Mapping
+#### 6. ACID Transaction Management
 
-Below are the core schema models illustrating the direct application of DBMS concepts in the Node.js + Mongoose codebase:
+- **Atomicity (A)**: Multi-step critical operations (`completePledgeAndVerifyDonation`, `createDirectDonation`, `createAdminUser`, cascade account removal) are wrapped in explicit database transactions (`withTransaction`) using `START TRANSACTION`, `COMMIT`, and `ROLLBACK`. If any step fails, all intermediate mutations are cleanly discarded.
+- **Consistency (C)**: Foreign Key referential constraints, `CHECK (units >= 0)`, and trigger validations guarantee invalid states never reach the storage engine.
+- **Isolation (I)**: InnoDB's default **REPEATABLE READ** with Multiversion Concurrency Control (MVCC) eliminates dirty reads and non-repeatable reads during high-throughput emergency surges.
+- **Durability (D)**: InnoDB Write-Ahead Logging (WAL) via doublewrite buffer and redo log guarantees all committed transactions survive unexpected server restarts.
 
-#### 1. User Entity Schema ([backend/src/models/User.js](file:///e:/DBMS/backend/src/models/User.js))
+---
+
+### MySQL Code Implementation and DBMS Mapping
+
+Below are the core schema models illustrating the direct application of DBMS concepts in the Node.js + MySQL codebase:
+
+#### 1. User Entity Data Access ([backend/src/models/User.js](file:///e:/DBMS/backend/src/models/User.js))
 ```javascript
-import mongoose from 'mongoose';
-
-const UserSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: [true, 'Name is required'],
-      trim: true,
-      maxlength: 100,
-    },
-    email: {
-      type: String,
-      required: [true, 'Email is required'],
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    password_hash: {
-      type: String,
-      required: [true, 'Password hash is required'],
-    },
-    role: {
-      type: String,
-      required: [true, 'Role is required'],
-      enum: ['donor', 'hospital', 'admin'],
-      default: 'donor',
-    },
-  },
-  {
-    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+export class User {
+  static async findById(id, connection = pool) {
+    const [rows] = await connection.query(
+      'SELECT id, name, email, password_hash, role, created_at, updated_at FROM users WHERE id = ?',
+      [id]
+    );
+    return rows[0] || null;
   }
-);
+
+  static async findByEmail(email, connection = pool) {
+    const [rows] = await connection.query(
+      'SELECT id, name, email, password_hash, role, created_at, updated_at FROM users WHERE LOWER(email) = LOWER(?)',
+      [email.trim()]
+    );
+    return rows[0] || null;
+  }
+
+  static async create({ name, email, password_hash, role = 'donor' }, connection = pool) {
+    const [result] = await connection.query(
+      'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
+      [name.trim(), email.toLowerCase().trim(), password_hash, role.toLowerCase().trim()]
+    );
+    return { id: result.insertId, name, email, role };
+  }
+}
 ```
 
-#### 2. Blood Inventory Schema with Compound Unique Index ([backend/src/models/BloodInventory.js](file:///e:/DBMS/backend/src/models/BloodInventory.js))
+#### 2. Blood Inventory Atomic Upsert with Compound Unique Key ([backend/src/models/BloodInventory.js](file:///e:/DBMS/backend/src/models/BloodInventory.js))
 ```javascript
-import mongoose from 'mongoose';
-
-const BloodInventorySchema = new mongoose.Schema(
-  {
-    hospital_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Hospital',
-      required: [true, 'Hospital ID is required'],
-    },
-    blood_group: {
-      type: String,
-      required: [true, 'Blood group is required'],
-      enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
-    },
-    units: {
-      type: Number,
-      required: true,
-      default: 0,
-      min: [0, 'Units cannot be negative'],
-    },
-  },
-  {
-    timestamps: { createdAt: false, updatedAt: 'updated_at' },
+export class BloodInventory {
+  static async upsert({ hospital_id, blood_group, units }, connection = pool) {
+    const [result] = await connection.query(
+      `INSERT INTO blood_inventory (hospital_id, blood_group, units)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE units = VALUES(units), updated_at = CURRENT_TIMESTAMP`,
+      [hospital_id, blood_group.toUpperCase(), Math.max(0, Number(units) || 0)]
+    );
+    return await this.findByHospitalAndGroup(hospital_id, blood_group, connection);
   }
-);
-
-BloodInventorySchema.index({ hospital_id: 1, blood_group: 1 }, { unique: true });
+}
 ```
 
-#### 3. Referential Cascade Deletion Execution ([backend/src/controllers/userController.js](file:///e:/DBMS/backend/src/controllers/userController.js))
+#### 3. ACID Transaction Management ([backend/src/config/db.js](file:///e:/DBMS/backend/src/config/db.js))
 ```javascript
-export const deleteUser = async (req, res, next) => {
+export const withTransaction = async (workFn) => {
+  const connection = await pool.getConnection();
   try {
-    const { user_id } = req.params;
-    const user = await User.findById(user_id);
-    if (!user) return next(new AppError('User not found', 404));
-
-    await Donor.deleteMany({ user_id });
-
-    const hospital = await Hospital.findOne({ user_id });
-    if (hospital) {
-      await BloodInventory.deleteMany({ hospital_id: hospital._id });
-      await BloodRequest.deleteMany({ hospital_id: hospital._id });
-      await Hospital.findByIdAndDelete(hospital._id);
-    }
-
-    await User.findByIdAndDelete(user_id);
-
-    res.status(200).json({
-      message: 'User and all associated profile, inventory, and request records cascade deleted successfully',
-    });
+    await connection.beginTransaction();
+    const result = await workFn(connection);
+    await connection.commit();
+    return result;
   } catch (error) {
-    next(error);
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
 };
 ```
@@ -951,8 +938,8 @@ To guarantee millisecond latency under high concurrency, MongoDB indexes are def
 ## Installation and Setup Guide
 
 ### Prerequisites
-- **Node.js**: Version `18.x` or `20.x+`
-- **MongoDB**: Local MongoDB instance (`mongodb://127.0.0.1:27017`) or **MongoDB Atlas** connection URI.
+- **Node.js**: Version `18.x` or `20.x+` (Active LTS / Current)
+- **PostgreSQL / Supabase**: Cloud Supabase project or PostgreSQL instance (v14+).
 
 ---
 
@@ -968,15 +955,21 @@ To guarantee millisecond latency under high concurrency, MongoDB indexes are def
    npm install
    ```
 
-3. Create/Configure your `.env` file:
+3. Create/Configure your `.env` file (copy from `.env.example`):
    ```env
    PORT=8000
    NODE_ENV=development
-   MONGODB_URL=mongodb://127.0.0.1:27017/lifelink
+   # Supabase Connection URI (from Project Settings -> Database -> Connection string -> URI)
+   DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
    CLIENT_URL=http://localhost:5173
    ```
 
-4. Start the backend server:
+4. Initialize database schema and automated PL/pgSQL triggers:
+   ```bash
+   npm run db:setup
+   ```
+
+5. Start the backend server:
    ```bash
    # Development with auto-reload:
    npm run dev
@@ -985,6 +978,29 @@ To guarantee millisecond latency under high concurrency, MongoDB indexes are def
    npm start
    ```
    *The backend will be live at `http://127.0.0.1:8000/`.*
+
+---
+
+### Global Cloud Hosting Deployment
+
+#### Option A: Docker Deployment (Render, Railway, Fly.io, AWS ECS, GCP Cloud Run)
+The backend includes an optimized multi-stage `Dockerfile`:
+```bash
+# Build the container image
+docker build -t lifelink-backend ./backend
+
+# Run the container with Supabase credentials
+docker run -p 8000:8000 -e DATABASE_URL="postgresql://..." -e NODE_ENV="production" lifelink-backend
+```
+
+#### Option B: Serverless Deployment (Vercel)
+A pre-configured [`vercel.json`](file:///e:/DBMS/backend/vercel.json) is included:
+1. Connect the GitHub repo to **Vercel**.
+2. Set Root Directory to `backend`.
+3. Configure Environment Variables:
+   - `DATABASE_URL`: Your Supabase connection string.
+   - `NODE_ENV`: `production`
+   - `CLIENT_URL`: Your deployed frontend URL.
 
 ---
 
@@ -1035,41 +1051,54 @@ DBMS/
 ├── package.json                  # Root orchestration and convenience scripts
 ├── README.md                     # Architecture, ER diagrams, and project documentation
 │
-├── backend/                      # Node.js + MongoDB RESTful API
-│   ├── package.json              # Express, Mongoose, Helmet, Cors
+├── backend/                      # Node.js + MySQL 8.0 RESTful API
+│   ├── package.json              # Express, mysql2, Helmet, Cors
 │   ├── server.js                 # Server entry point & graceful shutdown
 │   ├── .env.example              # Environment variables template
-│   ├── .env                      # Local environment configuration
 │   └── src/
 │       ├── app.js                # Express app initialization & middleware stack
 │       ├── config/
-│       │   ├── db.js             # Mongoose connection & lifecycle events
+│       │   ├── db.js             # MySQL connection pool, transaction helper & schema ensure
 │       │   └── env.js            # Environment validation & configuration
+│       ├── db/
+│       │   └── schema.sql        # Normalized DDL tables, constraints, indexes & triggers
 │       ├── models/
-│       │   ├── User.js           # User schema & JSON transformer
-│       │   ├── Donor.js          # Donor profile & geolocation schema
-│       │   ├── Hospital.js       # Hospital schema & contact definitions
-│       │   ├── BloodInventory.js # 8-group stock schema with compound uniqueness
-│       │   ├── BloodRequest.js   # Emergency blood request & triage schema
-│       │   └── Notification.js   # Notification logs
+│       │   ├── User.js           # User data access & queries
+│       │   ├── Donor.js          # Donor profiles & spatial queries
+│       │   ├── Hospital.js       # Hospital records & facilities
+│       │   ├── BloodInventory.js # 8-group stock matrix & atomic updates
+│       │   ├── BloodRequest.js   # Emergency triage requests & status locks
+│       │   ├── DonationPledge.js # Donor pledges & commitments
+│       │   ├── DonationHistory.js# Verified donation ledger & certificates
+│       │   └── Notification.js   # Real-time alert notifications
 │       ├── controllers/
-│       │   ├── authController.js         # Login & auth validation
-│       │   ├── userController.js         # User CRUD & cascade deletion
-│       │   ├── donorController.js        # Donor profiles & matching queries
-│       │   ├── hospitalController.js     # Hospital records & directory
-│       │   ├── bloodBankController.js    # 8-group matrix generation & upsert
-│       │   ├── bloodRequestController.js # Triage request creation & smart match
-│       │   └── analyticsController.js    # Aggregated platform statistics
+│       │   ├── authController.js         # Authentication & role resolution
+│       │   ├── userController.js         # User CRUD & cascade deletions
+│       │   ├── donorController.js        # Donor profiles & clinical directives
+│       │   ├── hospitalController.js     # Hospital operations & emergency directory
+│       │   ├── bloodBankController.js    # Stock matrix management & upserts
+│       │   ├── bloodRequestController.js # Triage request creation & status locks
+│       │   ├── donationPledgeController.js # ACID transactions & verification
+│       │   ├── donationHistoryController.js# Verified donation ledger & certificates
+│       │   ├── matchingController.js     # Compatibility engine & Haversine proximity
+│       │   ├── notificationController.js # Targeted alert queues
+│       │   ├── analyticsController.js    # Aggregated platform statistics
+│       │   └── adminController.js        # Governance, telemetry & cascade moderation
 │       ├── routes/
 │       │   ├── authRoutes.js             # /login
 │       │   ├── userRoutes.js             # /users
 │       │   ├── donorRoutes.js            # /donors
 │       │   ├── hospitalRoutes.js         # /hospitals
 │       │   ├── bloodRequestRoutes.js     # /blood-requests
+│       │   ├── donationPledgeRoutes.js   # /donation-pledges
+│       │   ├── donationHistoryRoutes.js  # /donation-history
+│       │   ├── matchingRoutes.js         # /matching
+│       │   ├── notificationRoutes.js     # /notifications
 │       │   ├── analyticsRoutes.js        # /analytics
+│       │   ├── adminRoutes.js            # /admin
 │       │   └── index.js                  # Route aggregator
 │       └── middlewares/
-│           └── errorMiddleware.js        # Global error & CastError transformer
+│           └── errorMiddleware.js        # Global error & standard error handler
 │
 └── frontend/                     # Modern React + Vite + TypeScript Client
     ├── package.json              # Dependencies (React, Lucide, Framer Motion, Tailwind)
