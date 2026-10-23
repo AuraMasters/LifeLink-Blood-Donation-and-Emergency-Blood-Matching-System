@@ -10,6 +10,8 @@
   <img src="https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase PostgreSQL" />
   <img src="https://img.shields.io/badge/React-v18.3-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-v5.6-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Flutter-v3.0+-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter" />
+  <img src="https://img.shields.io/badge/Dart-v3.0+-0175C2?style=for-the-badge&logo=dart&logoColor=white" alt="Dart" />
   <img src="https://img.shields.io/badge/TailwindCSS-v3.4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License" />
 </p>
@@ -34,22 +36,25 @@
    - [PL/pgSQL Stored Functions, Procedures & Triggers](#7-plpgsql-stored-functions-procedures--triggers)
    - [Multi-Level Indexing Strategy & Execution Cost Optimization](#8-multi-level-indexing-strategy--execution-cost-optimization)
    - [Textbook-Grade Relational Query Catalog (14 Formal Operations)](#comprehensive-database-query-catalog-dbms-operations--mathematical-formalization)
+   - [Centralized Database Schema DDL Script (`database/schema.sql`)](#database-schema-ddl-specification)
 5. [End-to-End Business Processes](#end-to-end-business-processes)
    - [1. User Onboarding and Role Segregation](#1-user-onboarding-and-role-segregation)
    - [2. Hospital Blood Bank Stock Management](#2-hospital-blood-bank-stock-management)
    - [3. Emergency Request Triage and Dispatch](#3-emergency-request-triage-and-dispatch)
    - [4. Donor Matching and Response Workflow](#4-donor-matching-and-response-workflow)
-   - [5. Administrative Oversight and Moderation](#5-administrative-oversight-and-moderation)
+   - [5. Role-Scoped Real-Time Notification Engine](#5-role-scoped-real-time-notification-engine)
+   - [6. Administrative Oversight and Moderation](#6-administrative-oversight-and-moderation)
 6. [Complete RESTful API Specification](#complete-restful-api-specification)
-7. [Database Schema and Indexing Strategy](#database-schema-and-indexing-strategy)
-8. [Blood Compatibility Reference Matrix](#blood-compatibility-reference-matrix)
-9. [Installation and Setup Guide](#installation-and-setup-guide)
+7. [Blood Compatibility Reference Matrix](#blood-compatibility-reference-matrix)
+8. [Installation and Setup Guide](#installation-and-setup-guide)
    - [Prerequisites](#prerequisites)
+   - [Database Schema Provisioning](#database-schema-provisioning)
    - [Backend Configuration and Execution](#backend-configuration-and-execution)
    - [Frontend Configuration and Execution](#frontend-configuration-and-execution)
-10. [Project Directory Structure](#project-directory-structure)
-11. [Future Scope: Native Mobile Application (Final Review)](#future-scope-native-mobile-application-final-review)
-12. [License and Acknowledgments](#license-and-acknowledgments)
+   - [Mobile Client Execution (Flutter)](#mobile-client-execution-flutter)
+9. [Project Directory Structure](#project-directory-structure)
+10. [Cross-Platform Native Mobile Application (Flutter Client)](#cross-platform-native-mobile-application-flutter-client)
+11. [License and Acknowledgments](#license-and-acknowledgments)
 
 ---
 
@@ -893,6 +898,26 @@ Below is the exhaustive mathematical and operational breakdown of the 14 core re
 
 ---
 
+### Database Schema DDL Specification
+
+The complete, authoritative SQL data definition script for LifeLink is maintained in [`database/schema.sql`](file:///e:/DBMS/database/schema.sql).
+
+This file contains the full end-to-end relational schema ready for direct execution in PostgreSQL, Supabase SQL Editor, or pgAdmin:
+- **8 Normalized Relations**: `users`, `donors`, `hospitals`, `blood_inventory`, `blood_requests`, `donation_pledges`, `donation_history`, `notifications`.
+- **115 Relational Constraints**: Primary keys, cascading foreign keys (`ON DELETE CASCADE`, `ON DELETE SET NULL`), check constraints (blood groups, positive volumes, status states), and compound unique keys (`uq_hospital_blood_group`, `users_email_key`).
+- **30 Database Indexes**: Functional, unique, and composite B-tree indexes guaranteeing sub-millisecond query evaluation.
+- **3 DML Event Triggers & Functions**: Automated 8-group stock provisioning (`trg_after_hospital_insert`), multi-table stock & pledge sync (`trg_after_donation_history_insert`), and state-lock enforcement (`trg_before_blood_request_update`).
+- **2 Stored Procedures**: Pessimistic locked inventory transfers (`sp_transfer_blood_units`) and atomic pledge fulfillment certification (`sp_fulfill_donation_pledge`).
+- **2 Computational Domain Functions**: Trigonometric Haversine distance (`fn_calculate_haversine_distance`) and biological compatibility lookup (`fn_check_blood_compatibility`).
+- **3 Relational Views**: `v_active_emergency_requests`, `v_hospital_inventory_matrix`, and `v_donor_activity_summary`.
+
+```bash
+# Execute the entire database schema locally via psql:
+psql -U postgres -d postgres -f database/schema.sql
+```
+
+---
+
 ## End-to-End Business Processes
 
 ### 1. User Onboarding and Role Segregation
@@ -924,7 +949,21 @@ LifeLink enforces strict subtype polymorphism during user registration through a
 2. **Compatibility Query**: The backend queries all active requests matching the donor's blood group and joins hospital contact information (`hospital_name`, `hospital_phone`, `emergency_contact`, `hospital_address`, and coordinates).
 3. **Direct Contact**: Donors can view the distance, open hospital navigation coordinates, or call the 24/7 hotline directly.
 
-### 5. Administrative Oversight and Moderation
+### 5. Role-Scoped Real-Time Notification Engine
+To prevent cross-role data leaks between healthcare facilities and volunteer donors, LifeLink enforces a role-scoped notification pipeline:
+
+1. **Role-Segregated Storage**: Every notification in `notifications` stores both `recipient_id` (the target user or facility entity ID) and `recipient_role` (`'donor'`, `'hospital'`, `'admin'`, or `'all'`).
+2. **Dual-Condition Scoping**: When a client requests notifications via `GET /notifications/user/:user_id?role=:role`, the database query enforces:
+   ```sql
+   WHERE (recipient_id IN ($1, ...) OR recipient_id = 'all')
+     AND (recipient_role = $2 OR recipient_role = 'all' OR recipient_role IS NULL)
+   ```
+3. **Hospital Inbound Stream**: Healthcare staff accounts exclusively receive donor pledges (`pledge_received`) and facility directives. They are strictly protected from receiving volunteer matching broadcasts (`Exact Blood Match: X Unit(s)`).
+4. **Donor Outbound Stream**: Registered donors receive emergency broadcasts matching their blood group, triage updates, and digital certificates (`donation_verified`) with links to their permanent audit ledger.
+5. **Self-Broadcast Suppression**: When a medical staff member creates an emergency broadcast, matching algorithms automatically suppress donor alerts toward the broadcaster's own user identity.
+6. **Visibility-Aware Polling**: The frontend and mobile apps employ a 60-second throttled polling loop paired with HTML5 `visibilitychange` listeners to refresh unread badges instantly when users switch tabs, without placing unnecessary read pressure on the PostgreSQL connection pool.
+
+### 6. Administrative Oversight and Moderation
 1. **Global Visibility**: Administrators have full access to view, search, and filter all registered users, active donors, verified hospitals, and platform analytics.
 2. **Auditing and Moderation**: In case of duplicate profiles, deactivated medical centers, or fraudulent entries, administrators can execute deletions with automatic cascade cleanup.
 
@@ -1238,6 +1277,23 @@ EXECUTE FUNCTION fn_before_blood_request_update();
 ### Prerequisites
 - **Node.js**: Version `18.x` or `20.x+` (Active LTS / Current)
 - **PostgreSQL / Supabase**: Cloud Supabase project or PostgreSQL instance (v14+).
+- **Flutter SDK** *(Optional, for mobile app)*: Version `3.0+` with Dart `3.0+`.
+
+---
+
+### Database Schema Provisioning
+
+LifeLink provides a standalone, comprehensive SQL DDL file containing all 8 normalized tables, 115 constraints, 30 indexes, triggers, procedures, and views:
+
+```bash
+# Option A: Execute locally via psql:
+psql -U postgres -d postgres -f database/schema.sql
+
+# Option B: Run in Supabase Cloud:
+# 1. Open your Supabase Dashboard -> SQL Editor
+# 2. Paste the contents of database/schema.sql
+# 3. Click 'Run' to provision all tables, views, procedures, and triggers.
+```
 
 ---
 
@@ -1262,20 +1318,20 @@ EXECUTE FUNCTION fn_before_blood_request_update();
    CLIENT_URL=http://localhost:5173
    ```
 
-4. Initialize database schema and automated PL/pgSQL triggers:
+4. Verify database connectivity:
    ```bash
    npm run db:setup
    ```
 
 5. Start the backend server:
    ```bash
-   # Development with auto-reload:
+   # Development mode with auto-reload:
    npm run dev
 
    # Production mode:
    npm start
    ```
-   *The backend will be live at `http://127.0.0.1:8000/`.*
+   *The backend REST API will be live at `http://127.0.0.1:8000/`.*
 
 ---
 
@@ -1314,31 +1370,51 @@ A pre-configured [`vercel.json`](file:///e:/DBMS/backend/vercel.json) is include
    npm install
    ```
 
-3. Configure environment variables (optional for local dev, required for deployment):
+3. Configure environment variables (optional for local dev):
    ```bash
-   # Copy the example environment template
    cp .env.example .env
    ```
    ```env
    # Backend API Endpoint
-   # Local development:
    VITE_API_BASE_URL=http://127.0.0.1:8000
-
-   # Cloud/Production deployment:
-   # VITE_API_BASE_URL=https://api.yourdomain.com
    ```
 
 4. Start the Vite development server:
    ```bash
    npm run dev
    ```
-   *The frontend will launch at `http://localhost:5173/`.*
+   *The web portal will launch at `http://localhost:5173/`.*
 
-5. Build for production deployment (Vercel, Netlify, Render, Cloudflare Pages):
+5. Build for production deployment:
    ```bash
    npm run build
    ```
    *The compiled, optimized distribution bundle will be output to `frontend/dist/`.*
+
+---
+
+### Mobile Client Execution (Flutter)
+
+The project includes an operational cross-platform mobile client in [`mobile/`](file:///e:/DBMS/mobile):
+
+1. Navigate to the `mobile` directory:
+   ```bash
+   cd mobile
+   ```
+
+2. Fetch Flutter packages:
+   ```bash
+   flutter pub get
+   ```
+
+3. Launch on an active Android emulator, iOS simulator, or connected device:
+   ```bash
+   # Run in debug mode:
+   flutter run
+
+   # Or launch in web preview:
+   flutter run -d chrome
+   ```
 
 ---
 
@@ -1347,13 +1423,17 @@ A pre-configured [`vercel.json`](file:///e:/DBMS/backend/vercel.json) is include
 ```
 DBMS/
 ├── package.json                  # Root orchestration and convenience scripts
-├── README.md                     # Architecture, ER diagrams, and project documentation
+├── README.md                     # Comprehensive architecture, DBMS specs & documentation
+├── LifeLink_DBMS_Report.pdf      # Formal academic DBMS project report
 │
-├── backend/                      # Node.js + PostgreSQL / Supabase RESTful API
+├── database/                     # PostgreSQL Relational Database Assets
+│   └── schema.sql                # Complete DDL: 8 tables, 115 constraints, 30 indexes, triggers, procedures, views
+│
+├── backend/                      # Node.js + Express + PostgreSQL / Supabase RESTful API
 │   ├── package.json              # Express, pg (node-postgres), Helmet, Cors
 │   ├── server.js                 # Server entry point & graceful shutdown
-│   ├── Dockerfile                # Production cloud container manifest
-│   ├── vercel.json               # Serverless cloud deployment configuration
+│   ├── Dockerfile                # Production container specification
+│   ├── vercel.json               # Serverless deployment configuration
 │   ├── .env.example              # Environment variables template
 │   └── src/
 │       ├── app.js                # Express app initialization & middleware stack
@@ -1368,7 +1448,7 @@ DBMS/
 │       │   ├── BloodRequest.js   # Emergency triage requests & status locks
 │       │   ├── DonationPledge.js # Donor pledges & commitments
 │       │   ├── DonationHistory.js# Verified donation ledger & certificates
-│       │   └── Notification.js   # Real-time alert notifications
+│       │   └── Notification.js   # Real-time alert notifications & role scoping
 │       ├── controllers/
 │       │   ├── authController.js         # Authentication & role resolution
 │       │   ├── userController.js         # User CRUD & cascade deletions
@@ -1379,7 +1459,7 @@ DBMS/
 │       │   ├── donationPledgeController.js # ACID transactions & verification
 │       │   ├── donationHistoryController.js# Verified donation ledger & certificates
 │       │   ├── matchingController.js     # Compatibility engine & Haversine proximity
-│       │   ├── notificationController.js # Targeted alert queues
+│       │   ├── notificationController.js # Role-isolated alert queues
 │       │   ├── analyticsController.js    # Aggregated platform statistics
 │       │   └── adminController.js        # Governance, telemetry & cascade moderation
 │       ├── routes/
@@ -1395,74 +1475,82 @@ DBMS/
 │       │   ├── analyticsRoutes.js        # /analytics
 │       │   ├── adminRoutes.js            # /admin
 │       │   └── index.js                  # Route aggregator
-│       └── middlewares/
-│           └── errorMiddleware.js        # Global error & standard error handler
+│       ├── middlewares/
+│       │   └── errorMiddleware.js        # Global error & SQLSTATE error handler
+│       └── utils/
+│           ├── bloodMatchingEngine.js    # Biological ABO/Rh compatibility rules
+│           └── distanceCalculator.js     # Haversine spatial calculation
 │
-└── frontend/                     # Modern React + Vite + TypeScript Client
-    ├── package.json              # Dependencies (React, Lucide, Framer Motion, Tailwind)
-    ├── vite.config.ts            # Vite build configuration
-    ├── tailwind.config.js        # Design tokens & responsive theme
-    ├── index.html                # Single-page application template
-    └── src/
-        ├── App.tsx               # Client routes & layout hierarchy
-        ├── main.tsx              # React DOM root
-        ├── index.css             # Global Tailwind directives & custom CSS
-        ├── lib/                  # Centralized API client & session helpers
-        ├── context/              # Toast & AuthModal context providers
-        ├── components/           # Reusable UI component atoms & modules
-        │   ├── ui/               # Card, Badge, StatCard, EmptyState
-        │   ├── common/           # Navbar, Footer, PageHeader, MobileAppBanner
-        │   ├── auth/             # LoginModal, RegisterModal (Modal-driven authentication)
-        │   ├── donor/            # DonorRequestCard, AvailabilityToggle
-        │   ├── hospital/         # BloodMatrixGrid, CreateRequestModal
-        │   └── admin/            # DataTable
-        ├── pages/                # Domain-structured application views
-        │   ├── index.ts          # Barrel export aggregator
-        │   ├── public/           # LandingPage, NotFoundPage
-        │   ├── donor/            # DonorDashboard, MatchRadar, Profile, History, Notifications, Settings
-        │   ├── hospital/         # HospitalDashboard, BloodBankStock, BloodRequests
-        │   └── admin/            # AdminLogin, AdminDashboard, AdminManagement
-        └── types/                # TypeScript interface definitions
+├── frontend/                     # Modern React 18 + Vite + TypeScript Web Portal
+│   ├── package.json              # Dependencies (React, Lucide, Framer Motion, Tailwind)
+│   ├── vite.config.ts            # Vite build configuration
+│   ├── tailwind.config.js        # Design tokens & responsive medical theme
+│   ├── index.html                # Single-page application entry HTML
+│   └── src/
+│       ├── App.tsx               # Client routes & layout hierarchy
+│       ├── main.tsx              # React DOM root
+│       ├── index.css             # Global Tailwind directives & custom CSS
+│       ├── lib/                  # Centralized API client & session helpers
+│       ├── context/              # Toast & AuthModal context providers
+│       ├── components/           # Reusable UI component atoms & modules
+│       │   ├── ui/               # Card, Badge, StatCard, EmptyState
+│       │   ├── common/           # Navbar, Footer, PageHeader, MobileAppBanner
+│       │   ├── auth/             # LoginModal, RegisterModal
+│       │   ├── donor/            # DonorRequestCard, AvailabilityToggle
+│       │   ├── hospital/         # BloodMatrixGrid, CreateRequestModal
+│       │   └── admin/            # DataTable
+│       ├── pages/                # Domain-structured application views
+│       │   ├── index.ts          # Barrel export aggregator
+│       │   ├── public/           # LandingPage, NotFoundPage
+│       │   ├── donor/            # DonorDashboard, MatchRadar, Profile, History, Notifications, Settings
+│       │   ├── hospital/         # HospitalDashboard, BloodBankStock, BloodRequests
+│       │   └── admin/            # AdminLogin, AdminDashboard, AdminManagement
+│       └── types/                # TypeScript interface definitions
+│
+└── mobile/                       # Cross-Platform Flutter Mobile Client (iOS & Android)
+    ├── pubspec.yaml              # Flutter dependencies (Provider, HTTP, Lucide)
+    ├── android/                  # Native Android project configuration
+    ├── assets/                   # App icons, illustrations, and branding assets
+    └── lib/
+        ├── main.dart             # Application root & theme configuration
+        ├── config/               # API endpoints, themes, and Lucide icons
+        ├── core/                 # Blood matching engine & distance utilities
+        ├── models/               # Data models (User, BloodRequest, Pledge, Notification)
+        ├── providers/            # Reactive state providers (Auth, Requests, Notifications)
+        └── screens/              # UI screens for Donor, Hospital, and Common alerts
 ```
 
 ---
 
-## Future Scope: Native Mobile Application (Final Review)
+## Cross-Platform Native Mobile Application (Flutter Client)
 
-For the final review and strategic roadmap, the core future development is the **Cross-Platform Native Mobile Application (iOS & Android)** engineered to empower on-the-go volunteer donors and emergency medical responders.
+LifeLink includes a fully integrated **Flutter Mobile Application** located in [`mobile/`](file:///e:/DBMS/mobile) built for on-the-go volunteer donors, medical responders, and triage supervisors.
 
-### Mobile Architecture & Native Hardware Interfacing Matrix
+### Mobile Architectural Organization
 
-| System Layer | Architectural Component | Technology Stack / Protocol | Technical Responsibility & Interaction |
-| :--- | :--- | :--- | :--- |
-| **Presentation Tier** | Cross-Platform Native Client | React Native / Flutter (iOS & Android) | 60 FPS responsive touch UI, dark mode themes, biometric authentication prompt integration. |
-| **Hardware Telemetry** | Geolocation & Motion Sensors | Native CoreLocation / Android Location API | Continuous background GPS beacon streaming coordinates for emergency radar radius calculations. |
-| **Push Dispatch Tier** | Emergency Alert Delivery | Firebase Cloud Messaging (FCM) & Apple APNs | Dedicated high-priority alert channel bypassing Silent/DND modes for critical trauma calls. |
-| **Local Persistence** | Offline-First Cache | Embedded SQLite / WatermelonDB | Zero-latency local storage of donor card, past donation certificates, and offline ABO chart. |
-| **Gateway & Security** | RESTful API Layer | Express.js over TLS 1.3 / JWT Auth | Bearer token authentication, rate limiting, and parameter sanitization. |
-| **Computational Core** | Spatial & Clinical Matching | PostgreSQL PL/pgSQL & Haversine Engine | Instantaneous matching of donor blood group and dynamic 15 km geofence radius. |
-| **Turn-by-Turn Navigation** | Native Mapping Interface | Apple Maps / Google Maps Deep Linking | Instant one-tap navigation routing emergency responders to target hospital blood bank. |
+```mermaid
+graph TD
+    Client[Flutter Mobile App] --> ProviderLayer[Provider State Management]
+    ProviderLayer --> AuthP[AuthProvider]
+    ProviderLayer --> NotifP[NotificationProvider]
+    ProviderLayer --> ReqP[BloodRequestsProvider]
+    
+    AuthP --> API[REST API Gateway :8000]
+    NotifP --> API
+    ReqP --> API
+    
+    API --> DB[(Supabase PostgreSQL)]
+```
 
-### Core Mobile Application Capabilities
-
-#### 1. Cross-Platform Native Experience
-- **Framework**: Built with **React Native / Flutter** for 60fps fluid animations, low battery consumption, and universal compatibility across iOS and Android devices.
-- **Biometric Security**: TouchID / FaceID biometric authentication for instantaneous emergency profile access without password entry friction.
-
-#### 2. Emergency Push Beacon System
-- **Critical Audio Chime**: High-priority alert channel bypassing Silent / Do Not Disturb modes on mobile OS for critical trauma (`emergency`) broadcasts.
-- **One-Tap Availability Confirmation**: Donors can accept or snooze emergency transfusion calls directly from interactive push notification banners without unlocking their phone.
-
-#### 3. Real-Time Background Geolocation & Proximity Tracking
-- **Adaptive Geofencing**: Automatically detects when registered volunteer donors move within a 5km to 15km radius of an emergency hospital with an active matching blood request.
-- **Turn-by-Turn GPS Guidance**: Deep-links directly to Google Maps / Apple Maps for optimal emergency transit routing to the target hospital blood bank.
-
-#### 4. Offline-First Synchronization Engine
-- **Local SQLite / WatermelonDB Cache**: Allows donors to view their digital blood donor card, past donation history certificates, and blood compatibility charts even in zero-connectivity environments.
-- **Background Sync**: Synchronizes locally logged health eligibility metrics and donation logs immediately when connectivity is restored.
+### Key Mobile Capabilities
+1. **Donor On-the-Go Dashboard**: Instant availability toggles, nearby compatible emergency request feeds, and GPS proximity indicators.
+2. **Hospital Triage Operations**: Fast-action broadcast forms to post critical blood requirements from emergency wards with priority tags (`emergency`, `urgent`, `normal`).
+3. **Live Alerts & Notification Screen**: Real-time push and poll alert notifications with role-segregated filters (`emergency`, `pledge`, `transfusion`).
+4. **Blood Matching Engine**: Embedded client-side biological compatibility evaluator matching patient and donor blood phenotypes instantly.
+5. **Direct Dial & Deep-Linking**: One-tap phone dialing to emergency triage desks and instant deep-linking to navigation map coordinates.
 
 ---
 
 ## License and Acknowledgments
 
-This project is licensed under the **MIT License**.
+This project is licensed under the **MIT License**. Built with modern DBMS engineering principles, strict relational normalization (3NF/BCNF), automated PL/pgSQL database triggers, and enterprise-grade healthcare reliability standards.
