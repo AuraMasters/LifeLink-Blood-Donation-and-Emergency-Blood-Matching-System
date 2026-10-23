@@ -2,8 +2,6 @@ import { DonationPledge } from '../models/DonationPledge.js';
 import { BloodRequest } from '../models/BloodRequest.js';
 import { Hospital } from '../models/Hospital.js';
 import { Donor } from '../models/Donor.js';
-import { User } from '../models/User.js';
-import { BloodInventory } from '../models/BloodInventory.js';
 import { DonationHistory } from '../models/DonationHistory.js';
 import { Notification } from '../models/Notification.js';
 import { withTransaction } from '../config/db.js';
@@ -225,14 +223,7 @@ export const completePledgeAndVerifyDonation = async (req, res, next) => {
     let historyEntry = null;
 
     await withTransaction(async (conn) => {
-      
       await DonationPledge.update(pledge_id, { status: 'completed' }, conn);
-
-      
-      
-      
-      
-      
       historyEntry = await DonationHistory.create(
         {
           donor_id: pledge.donor_id,
