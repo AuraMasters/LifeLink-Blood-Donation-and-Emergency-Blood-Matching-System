@@ -8,7 +8,6 @@ import {
   ArrowRight,
   ShieldCheck,
   Award,
-  Database,
   CheckCircle2,
   RefreshCw,
   Compass,
@@ -76,10 +75,6 @@ export function AdminDashboard() {
         description="Real-time system telemetry, database record management, and clinical verification audits"
         action={
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 text-white px-3 py-1 text-xs font-bold shadow-xs">
-              <Database className="h-3.5 w-3.5 text-emerald-400" />
-              MongoDB Database
-            </span>
             <button
               type="button"
               onClick={handleRefresh}

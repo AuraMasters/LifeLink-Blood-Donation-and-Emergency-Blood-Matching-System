@@ -53,6 +53,9 @@ export const createBloodRequest = async (req, res, next) => {
       const compatibleGroups = getCompatibleDonorGroups(group, 'rbc');
       const matchingDonors = await Donor.findByGroups(compatibleGroups, true);
       for (const d of matchingDonors) {
+        if (d.user_id && hospital?.user_id && String(d.user_id) === String(hospital.user_id)) {
+          continue;
+        }
         const isExact = d.blood_group === group;
         await Notification.create({
           recipient_id: String(d.user_id || d.id),
