@@ -175,7 +175,7 @@ export function Navbar() {
             <div className="flex items-center gap-2 sm:gap-2.5">
               {/* Notification Bell */}
               <Link
-                to="/donor/notifications"
+                to={role === "hospital" ? "/hospital/notifications" : "/donor/notifications"}
                 className="relative rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
                 title="Notifications"
               >

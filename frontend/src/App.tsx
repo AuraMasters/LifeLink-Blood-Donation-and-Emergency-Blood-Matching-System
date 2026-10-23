@@ -100,6 +100,8 @@ function AppRoutes() {
         <Route path="/hospital/dashboard" element={<AppLayout><HospitalDashboard /></AppLayout>} />
         <Route path="/hospital/blood-bank" element={<AppLayout><HospitalBloodBank /></AppLayout>} />
         <Route path="/hospital/requests" element={<AppLayout><HospitalBloodRequests /></AppLayout>} />
+        <Route path="/hospital/notifications" element={<AppLayout><NotificationsPage /></AppLayout>} />
+        <Route path="/notifications" element={<AppLayout><NotificationsPage /></AppLayout>} />
         <Route path="/hospital/settings" element={<AppLayout><HospitalSettingsPage /></AppLayout>} />
         <Route path="/hospital/profile" element={<AppLayout><HospitalSettingsPage /></AppLayout>} />
         <Route path="/hospital/map" element={<AppLayout><HospitalDonorsMapPage /></AppLayout>} />

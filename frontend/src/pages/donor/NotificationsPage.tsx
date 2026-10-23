@@ -65,7 +65,7 @@ export function NotificationsPage() {
   const handleMarkAllRead = async () => {
     if (!session) return;
     try {
-      await api.put(`/notifications/user/${session.user.id}/read-all`);
+      await api.put(`/notifications/user/${session.user.id}/read-all?role=${session.user.role}`);
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
       showToast("All notifications marked as read");
@@ -83,6 +83,8 @@ export function NotificationsPage() {
       showToast("Failed to delete notification", "error");
     }
   };
+
+  const isHospital = session?.user.role === "hospital";
 
   const filteredNotifications = notifications.filter((n) => {
     if (activeFilter === "emergency") return n.notification_type.includes("emergency") || n.notification_type.includes("direct");
@@ -104,12 +106,29 @@ export function NotificationsPage() {
     return <Bell className="h-4 w-4 text-amber-500" />;
   };
 
+  const filterTabs = isHospital
+    ? [
+        { id: "all", label: "All Alerts" },
+        { id: "pledge", label: "Donor Pledges" },
+        { id: "emergency", label: "Emergency Broadcasts" },
+      ]
+    : [
+        { id: "all", label: "All Alerts" },
+        { id: "emergency", label: "Emergency Broadcasts" },
+        { id: "pledge", label: "Pledges" },
+        { id: "verified", label: "Donations & Certificates" },
+      ];
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
       <PageHeader
-        backTo={session?.user.role === "hospital" ? "/hospital/dashboard" : "/donor/dashboard"}
+        backTo={isHospital ? "/hospital/dashboard" : "/donor/dashboard"}
         title="Notifications & Live Alerts"
-        description="Real-time emergency blood broadcasts, donation pledges, and certificates"
+        description={
+          isHospital
+            ? "Real-time donor arrival pledges, clinical dispatch updates, and facility alerts"
+            : "Real-time emergency blood broadcasts, donation pledges, and certificates"
+        }
         action={
           unreadCount > 0 ? (
             <button
@@ -126,12 +145,7 @@ export function NotificationsPage() {
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {[
-          { id: "all", label: "All Alerts" },
-          { id: "emergency", label: "Emergency Broadcasts" },
-          { id: "pledge", label: "Pledges" },
-          { id: "verified", label: "Donations & Certificates" },
-        ].map((tab) => (
+        {filterTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -197,10 +211,19 @@ export function NotificationsPage() {
 
                       {notif.notification_type.includes("emergency") && (
                         <Link
-                          to="/donor/requests"
+                          to={isHospital ? "/hospital/requests" : "/donor/requests"}
                           className="font-bold text-red-600 hover:underline inline-flex items-center gap-0.5"
                         >
                           View Request <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      )}
+
+                      {notif.notification_type.includes("pledge") && (
+                        <Link
+                          to={isHospital ? "/hospital/requests" : "/donor/requests"}
+                          className="font-bold text-blue-600 hover:underline inline-flex items-center gap-0.5"
+                        >
+                          {isHospital ? "Review Inbound Pledge" : "View Pledge"} <ArrowRight className="h-3 w-3" />
                         </Link>
                       )}
 

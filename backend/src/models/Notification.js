@@ -10,14 +10,14 @@ export class Notification {
     const params = [...recipientIds];
 
     let sql = `SELECT * FROM notifications
-               WHERE (recipient_id IN (${idPlaceholders}) OR recipient_role = 'all'`;
+               WHERE (recipient_id IN (${idPlaceholders}) OR recipient_id = 'all')`;
 
-    if (role) {
-      sql += ' OR recipient_role = ?';
-      params.push(role);
+    if (role && role !== 'all') {
+      sql += ` AND (recipient_role = ? OR recipient_role = 'all' OR recipient_role IS NULL)`;
+      params.push(role.toLowerCase().trim());
     }
 
-    sql += ') ORDER BY created_at DESC LIMIT ?';
+    sql += ' ORDER BY created_at DESC LIMIT ?';
     params.push(Number(limit) || 50);
 
     const [rows] = await connection.query(sql, params);
@@ -69,15 +69,22 @@ export class Notification {
     return rows[0] || null;
   }
 
-  static async markAllRead(recipientIds, connection = pool) {
+  static async markAllRead(recipientIds, role = null, connection = pool) {
     if (!Array.isArray(recipientIds)) {
       recipientIds = [String(recipientIds)];
     }
     const placeholders = recipientIds.map(() => '?').join(',');
-    const [rows, result] = await connection.query(
-      `UPDATE notifications SET is_read = TRUE, updated_at = CURRENT_TIMESTAMP WHERE recipient_id IN (${placeholders}) AND is_read = FALSE`,
-      recipientIds
-    );
+    const params = [...recipientIds];
+
+    let sql = `UPDATE notifications SET is_read = TRUE, updated_at = CURRENT_TIMESTAMP
+               WHERE recipient_id IN (${placeholders}) AND is_read = FALSE`;
+
+    if (role && role !== 'all') {
+      sql += ` AND (recipient_role = ? OR recipient_role = 'all' OR recipient_role IS NULL)`;
+      params.push(role.toLowerCase().trim());
+    }
+
+    const [rows, result] = await connection.query(sql, params);
     return result?.rowCount || 0;
   }
 

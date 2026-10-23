@@ -1,27 +1,42 @@
 import { Notification } from '../models/Notification.js';
 import { Donor } from '../models/Donor.js';
 import { Hospital } from '../models/Hospital.js';
+import { User } from '../models/User.js';
 import { AppError } from '../middlewares/errorMiddleware.js';
 
 export const getUserNotifications = async (req, res, next) => {
   try {
     const { user_id } = req.params;
-    const { role } = req.query;
+    let { role } = req.query;
 
+    if (!role) {
+      const user = await User.findById(user_id);
+      role = user?.role;
+    }
+
+    const normalizedRole = role ? role.toLowerCase().trim() : null;
     const recipientIds = [String(user_id)];
 
     try {
-      const [donor, hospital] = await Promise.all([
-        Donor.findByUserId(user_id),
-        Hospital.findByUserId(user_id),
-      ]);
-      if (donor?.id) recipientIds.push(String(donor.id));
-      if (hospital?.id) recipientIds.push(String(hospital.id));
+      if (normalizedRole === 'hospital') {
+        const hospital = await Hospital.findByUserId(user_id);
+        if (hospital?.id) recipientIds.push(String(hospital.id));
+      } else if (normalizedRole === 'donor') {
+        const donor = await Donor.findByUserId(user_id);
+        if (donor?.id) recipientIds.push(String(donor.id));
+      } else {
+        const [donor, hospital] = await Promise.all([
+          Donor.findByUserId(user_id),
+          Hospital.findByUserId(user_id),
+        ]);
+        if (donor?.id) recipientIds.push(String(donor.id));
+        if (hospital?.id) recipientIds.push(String(hospital.id));
+      }
     } catch {
-      
+      // Ignore entity lookup errors and proceed with user_id
     }
 
-    const notifications = await Notification.findByRecipient(recipientIds, role, 50);
+    const notifications = await Notification.findByRecipient(recipientIds, normalizedRole, 50);
 
     const formatted = notifications.map((n) => ({
       id: String(n.id),
@@ -69,20 +84,36 @@ export const markNotificationRead = async (req, res, next) => {
 export const markAllRead = async (req, res, next) => {
   try {
     const { user_id } = req.params;
+    let { role } = req.query;
 
-    const recipientIds = [String(user_id)];
-    try {
-      const [donor, hospital] = await Promise.all([
-        Donor.findByUserId(user_id),
-        Hospital.findByUserId(user_id),
-      ]);
-      if (donor?.id) recipientIds.push(String(donor.id));
-      if (hospital?.id) recipientIds.push(String(hospital.id));
-    } catch {
-      
+    if (!role) {
+      const user = await User.findById(user_id);
+      role = user?.role;
     }
 
-    await Notification.markAllRead(recipientIds);
+    const normalizedRole = role ? role.toLowerCase().trim() : null;
+    const recipientIds = [String(user_id)];
+
+    try {
+      if (normalizedRole === 'hospital') {
+        const hospital = await Hospital.findByUserId(user_id);
+        if (hospital?.id) recipientIds.push(String(hospital.id));
+      } else if (normalizedRole === 'donor') {
+        const donor = await Donor.findByUserId(user_id);
+        if (donor?.id) recipientIds.push(String(donor.id));
+      } else {
+        const [donor, hospital] = await Promise.all([
+          Donor.findByUserId(user_id),
+          Hospital.findByUserId(user_id),
+        ]);
+        if (donor?.id) recipientIds.push(String(donor.id));
+        if (hospital?.id) recipientIds.push(String(hospital.id));
+      }
+    } catch {
+      // Ignore entity lookup errors
+    }
+
+    await Notification.markAllRead(recipientIds, normalizedRole);
 
     return res.status(200).json({
       message: 'All notifications marked as read',
